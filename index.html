@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>劳动防护用品领用登记 - 登录</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="login-page">
+  <div class="login-box">
+    <h2>劳动防护用品领用登记</h2>
+    <p class="subtitle">管理员 / 线长 / 班组长 登录</p>
+    <form id="loginForm">
+      <div class="form-group">
+        <label>用户名</label>
+        <input type="text" id="username" placeholder="请输入用户名" required autocomplete="username">
+      </div>
+      <div class="form-group">
+        <label>密码</label>
+        <input type="password" id="password" placeholder="请输入密码" required autocomplete="current-password">
+      </div>
+      <button type="submit" class="btn btn-primary btn-block" style="margin-top:8px;">登 录</button>
+    </form>
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid #eee;text-align:center;">
+      <p style="font-size:12px;color:#999;margin-bottom:8px;">员工领用请扫描产线二维码</p>
+      <a href="employee.html" class="btn btn-default btn-sm" style="text-decoration:none;">员工领用入口（测试）</a>
+    </div>
+    <div style="margin-top:16px;font-size:11px;color:#bbb;text-align:center;">
+      默认管理员：admin / admin123（首次登录请修改密码）
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js"></script>
+  <script src="js/supabase-init.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/common.js"></script>
+  <script>
+    // 如果已登录，直接跳转
+    const currentUser = Auth.getCurrentUser();
+    if (currentUser) {
+      Auth.redirectByRole(currentUser.role);
+    }
+
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+
+      Common.showLoading('登录中...');
+      const result = await Auth.login(username, password);
+      Common.hideLoading();
+
+      if (result.success) {
+        Common.toast('登录成功', 'success');
+        setTimeout(() => Auth.redirectByRole(result.user.role), 500);
+      } else {
+        Common.toast(result.message, 'error');
+      }
+    });
+  </script>
+</body>
+</html>

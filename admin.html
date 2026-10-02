@@ -1,0 +1,1285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>管理后台 - 劳动防护用品管理</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .sidebar { width: 200px; background: #2c3e50; min-height: calc(100vh - 50px); float: left; }
+    .sidebar button { display: block; width: 100%; padding: 14px 20px; background: none; border: none; color: #bdc3c7; text-align: left; cursor: pointer; font-size: 14px; border-left: 3px solid transparent; }
+    .sidebar button:hover { background: #34495e; color: #fff; }
+    .sidebar button.active { background: #34495e; color: #fff; border-left-color: #1a73e8; }
+    .main-content { margin-left: 200px; padding: 20px; }
+    @media (max-width: 768px) { .sidebar { width: 100%; min-height: auto; float: none; display: flex; overflow-x: auto; } .sidebar button { white-space: nowrap; width: auto; } .main-content { margin-left: 0; } }
+  </style>
+</head>
+<body>
+  <div class="topbar" style="height:50px;">
+    <h1>管理后台</h1>
+    <div class="user-info">
+      <span id="userName"></span>
+      <button onclick="Auth.showChangePasswordModal()" style="margin-right:8px;">修改密码</button>
+      <button onclick="Auth.logout()">退出</button>
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <button class="active" onclick="switchPage('dashboard', this)">📊 工作台</button>
+    <button onclick="switchPage('supplies', this)">📦 用品管理</button>
+    <button onclick="switchPage('lines', this)">🏭 产线/班组</button>
+    <button onclick="switchPage('users', this)">👤 账号管理</button>
+    <button onclick="switchPage('demands', this)">📋 需求单管理</button>
+    <button onclick="switchPage('temp', this)">⚡ 临时采购</button>
+    <button onclick="switchPage('stock', this)">📈 全厂库存</button>
+    <button onclick="switchPage('adjustments', this)">🔍 库存调整审核</button>
+    <button onclick="switchPage('reports', this)">📑 报表中心</button>
+    <button onclick="switchPage('logs', this)">📝 操作日志</button>
+  </div>
+
+  <div class="main-content">
+    <!-- 工作台 -->
+    <div id="page-dashboard" class="page">
+      <h2 style="margin-bottom:16px;">工作台</h2>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="num" id="statLines">0</div><div class="label">产线数</div></div>
+        <div class="stat-card"><div class="num" id="statSupplies">0</div><div class="label">用品种类</div></div>
+        <div class="stat-card"><div class="num" id="statPending">0</div><div class="label">待签需求单</div></div>
+        <div class="stat-card"><div class="num" id="statLowStock">0</div><div class="label">低库存预警</div></div>
+      </div>
+      <div class="card">
+        <h3>待处理事项</h3>
+        <div id="todoList"></div>
+      </div>
+    </div>
+
+    <!-- 用品管理 -->
+    <div id="page-supplies" class="page" style="display:none;">
+      <h2 style="margin-bottom:16px;">用品管理</h2>
+      <div class="btn-group" style="margin-bottom:12px;">
+        <button class="btn btn-primary" onclick="showSupplyModal()">+ 新增用品</button>
+        <button class="btn btn-default" onclick="document.getElementById('importFile').click()">📥 Excel导入</button>
+        <button class="btn btn-default" onclick="exportSuppliesTemplate()">📄 下载模板(含现有数据)</button>
+        <input type="file" id="importFile" accept=".csv" style="display:none;" onchange="importSupplies(event)">
+      </div>
+      <div class="card">
+        <div class="table-wrapper">
+          <table class="data-table" id="supplyTable">
+            <thead><tr><th>编号</th><th>名称</th><th>规格型号</th><th>领用单位</th><th>采购单位</th><th>换算</th><th>分类</th><th>安全库存</th><th>状态</th><th>操作</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 产线/班组 -->
+    <div id="page-lines" class="page" style="display:none;">
+      <h2 style="margin-bottom:16px;">产线与班组管理</h2>
+      <div class="btn-group" style="margin-bottom:12px;">
+        <button class="btn btn-primary" onclick="showLineModal()">+ 新增产线</button>
+      </div>
+      <div id="linesList"></div>
+    </div>
+
+    <!-- 账号管理 -->
+    <div id="page-users" class="page" style="display:none;">
+      <h2 style="margin-bottom:16px;">账号管理</h2>
+      <div class="btn-group" style="margin-bottom:12px;">
+        <button class="btn btn-primary" onclick="showUserModal()">+ 新增账号</button>
+      </div>
+      <div class="card">
+        <div class="table-wrapper">
+          <table class="data-table" id="userTable">
+            <thead><tr><th>用户名</th><th>姓名</th><th>角色</th><th>产线</th><th>班组</th><th>状态</th><th>操作</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 需求单管理 -->
+    <div id="page-demands" class="page" style="display:none;">
+      <h2 style="margin-bottom:16px;">需求单管理</h2>
+      <div class="card">
+        <div class="form-row">
+          <div class="form-group"><label>状态</label><select id="demandFilter" onchange="loadDemandsAdmin()"><option value="">全部</option><option value="submitted">待管理员签</option><option value="admin_signed">在途</option><option value="done">已完成</option><option value="cancelled">已撤回</option></select></div>
+        </div>
+      </div>
+      <div id="demandsAdminList"></div>
+    </div>
+
+    <!-- 临时采购 -->
+    <div id="page-temp" class="page" style="display:none;">
+      <h2 style="margin-bottom:16px;">临时采购管理</h2>
+      <div id="tempAdminList"></div>
+    </div>
+
+    <!-- 全厂库存 -->
+    <div id="page-stock" class="page" style="display:none;">
+      <h2 style="margin-bottom:16px;">全厂库存</h2>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <h3 style="margin:0;">分产线库存</h3>
+          <div>
+            <button class="btn btn-default btn-sm" onclick="downloadStockTemplate()">下载导入模板</button>
+            <button class="btn btn-primary btn-sm" onclick="document.getElementById('stockImportFile').click()">📥 批量导入库存</button>
+            <input type="file" id="stockImportFile" accept=".csv" style="display:none;" onchange="importStock(event)">
+          </div>
+        </div>
+        <div class="table-wrapper">
+          <table class="data-table" id="allStockTable">
+            <thead><tr><th>用品</th><th>规格</th><th>单位</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px;">
+        <h3>出入库流水</h3>
+        <div class="form-row">
+          <div class="form-group"><label>产线</label><select id="logLineFilter" onchange="loadAllStockRecords()"><option value="">全部</option></select></div>
+          <div class="form-group"><label>类型</label><select id="logTypeFilter" onchange="loadAllStockRecords()"><option value="">全部</option><option value="in">月度入库</option><option value="temp_in">临时入库</option><option value="out">领用出库</option><option value="adjust">盘点调整</option></select></div>
+        </div>
+        <div id="allStockRecordsList"></div>
+      </div>
+    </div>
+
+    <!-- 库存调整审核 -->
+    <div id="page-adjustments" class="page" style="display:none;">
+      <h2 style="margin-bottom:16px;">库存调整审核</h2>
+      <div class="card">
+        <div class="form-row">
+          <div class="form-group"><label>状态</label><select id="adjStatusFilter" onchange="loadAdjustments()"><option value="pending">待确认</option><option value="approved">已确认</option><option value="rejected">已驳回</option><option value="">全部</option></select></div>
+        </div>
+        <div id="adjustmentsList"></div>
+      </div>
+    </div>
+
+    <!-- 报表中心 -->
+    <div id="page-reports" class="page" style="display:none;">
+      <h2 style="margin-bottom:16px;">报表中心</h2>
+      <div class="card">
+        <h3>月度需求汇总表</h3>
+        <div class="form-row">
+          <div class="form-group"><label>申领月份</label><input type="month" id="summaryMonth"></div>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-primary" onclick="generateSummary()">生成汇总表</button>
+          <button class="btn btn-success" onclick="exportSummaryCSV()">导出CSV</button>
+          <button class="btn btn-default" onclick="printSummary()">打印</button>
+        </div>
+        <div id="summaryArea" style="margin-top:16px;"></div>
+      </div>
+
+      <div class="card" style="margin-top:16px;">
+        <h3>领用汇总统计</h3>
+        <div class="form-row">
+          <div class="form-group"><label>开始日期</label><input type="date" id="reqStartDate"></div>
+          <div class="form-group"><label>结束日期</label><input type="date" id="reqEndDate"></div>
+          <div class="form-group"><label>产线</label><select id="reqLineFilter"><option value="">全部</option></select></div>
+          <div class="form-group"><label>用工性质</label><select id="reqWorkerFilter"><option value="">全部</option><option value="formal">正式工</option><option value="labor">劳务工</option></select></div>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-primary" onclick="generateReqSummary()">生成统计</button>
+          <button class="btn btn-success" onclick="exportReqSummary()">导出CSV</button>
+        </div>
+        <div id="reqSummaryArea" style="margin-top:16px;"></div>
+      </div>
+
+      <div class="card" style="margin-top:16px;">
+        <h3>个人领用明细查询</h3>
+        <div class="form-row">
+          <div class="form-group"><label>员工姓名</label><input type="text" id="searchEmpName" placeholder="输入姓名查询"></div>
+          <div class="form-group"><label>月份</label><input type="month" id="searchEmpMonth"></div>
+        </div>
+        <button class="btn btn-primary" onclick="searchEmpRequisitions()">查询</button>
+        <div id="empReqArea" style="margin-top:16px;"></div>
+      </div>
+    </div>
+
+    <!-- 操作日志 -->
+    <div id="page-logs" class="page" style="display:none;">
+      <h2 style="margin-bottom:16px;">操作日志</h2>
+      <div class="card">
+        <div class="table-wrapper">
+          <table class="data-table" id="logTable">
+            <thead><tr><th>时间</th><th>操作人</th><th>角色</th><th>动作</th><th>详情</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 通用弹窗 -->
+  <div id="modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:200;align-items:center;justify-content:center;padding:16px;">
+    <div class="card" style="max-width:500px;width:100%;max-height:90vh;overflow-y:auto;">
+      <h3 id="modalTitle">标题</h3>
+      <div id="modalBody"></div>
+      <div class="btn-group" style="margin-top:16px;">
+        <button class="btn btn-default" onclick="closeModal()">取消</button>
+        <button class="btn btn-primary" id="modalConfirm">确认</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 管理员签名弹窗 -->
+  <div id="signModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:200;align-items:center;justify-content:center;padding:16px;">
+    <div class="card" style="max-width:500px;width:100%;">
+      <h3>管理员签名发放</h3>
+      <div id="signDetail" style="margin-bottom:12px;"></div>
+      <canvas id="adminSigCanvas" class="signature-canvas"></canvas>
+      <div class="btn-group" style="margin-top:12px;">
+        <button class="btn btn-default" onclick="closeSignModal()">取消</button>
+        <button class="btn btn-success" onclick="confirmAdminSign()">确认签名发放</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js"></script>
+  <script src="js/supabase-init.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/common.js"></script>
+  <script src="js/signature.js"></script>
+  <script>
+    const user = Auth.requireLogin(['admin']);
+    document.getElementById('userName').textContent = user.name;
+    document.getElementById('summaryMonth').value = Common.nextMonth();
+
+    let allLines = [], allTeams = [], allSupplies = [], currentSignOrder = null, adminSigPad = null;
+
+    function switchPage(page, btn) {
+      document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
+      document.querySelectorAll('.sidebar button').forEach(b => b.classList.remove('active'));
+      document.getElementById('page-' + page).style.display = 'block';
+      btn.classList.add('active');
+      if (page === 'dashboard') loadDashboard();
+      if (page === 'supplies') loadSuppliesAdmin();
+      if (page === 'lines') loadLinesAdmin();
+      if (page === 'users') loadUsersAdmin();
+      if (page === 'demands') loadDemandsAdmin();
+      if (page === 'temp') loadTempAdmin();
+      if (page === 'stock') loadAllStock();
+      if (page === 'adjustments') loadAdjustments();
+      if (page === 'logs') loadLogs();
+    }
+
+    function closeModal() { document.getElementById('modal').style.display = 'none'; }
+    function closeSignModal() { document.getElementById('signModal').style.display = 'none'; }
+
+    // ===== 工作台 =====
+    async function loadDashboard() {
+      const [{ count: lc }, { count: sc }, { data: pending }, { data: stocks }] = await Promise.all([
+        supabase.from('production_lines').select('*', { count: 'exact', head: true }),
+        supabase.from('supplies').select('*', { count: 'exact', head: true }).eq('status', 'active'),
+        supabase.from('demand_orders').select('id').eq('status', 'submitted'),
+        supabase.from('supply_stock').select('quantity, supplies(safety_stock)')
+      ]);
+      document.getElementById('statLines').textContent = lc || 0;
+      document.getElementById('statSupplies').textContent = sc || 0;
+      document.getElementById('statPending').textContent = (pending || []).length;
+      const low = (stocks || []).filter(s => s.quantity <= (s.supplies?.safety_stock || 0)).length;
+      document.getElementById('statLowStock').textContent = low;
+
+      // 待处理
+      const { data: tempPending } = await supabase.from('temp_purchases').select('*').eq('status', 'applied');
+      const { data: adjPending } = await supabase.from('stock_adjustments').select('id').eq('status', 'pending');
+      const todos = [];
+      if ((pending || []).length > 0) todos.push(`<div class="item-row"><span>📋 有 ${pending.length} 张需求单待签名发放</span><button class="btn btn-primary btn-sm" onclick="switchPage('demands', document.querySelector('.sidebar button:nth-child(5)'))">去处理</button></div>`);
+      if ((tempPending || []).length > 0) todos.push(`<div class="item-row"><span>⚡ 有 ${tempPending.length} 个临时采购待入库</span><button class="btn btn-warning btn-sm" onclick="switchPage('temp', document.querySelector('.sidebar button:nth-child(6)'))">去处理</button></div>`);
+      if ((adjPending || []).length > 0) todos.push(`<div class="item-row"><span>🔍 有 ${adjPending.length} 条库存调整待审核</span><button class="btn btn-success btn-sm" onclick="switchPage('adjustments', document.querySelector('.sidebar button:nth-child(8)'))">去审核</button></div>`);
+      document.getElementById('todoList').innerHTML = todos.length ? todos.join('') : '<p style="color:#999;">暂无待处理事项</p>';
+    }
+
+    // ===== 用品管理 =====
+    async function loadSuppliesAdmin() {
+      const { data } = await supabase.from('supplies').select('*').order('code');
+      allSupplies = data || [];
+      document.querySelector('#supplyTable tbody').innerHTML = allSupplies.map(s => `
+        <tr>
+          <td>${Common.escapeHtml(s.code || '')}</td>
+          <td>${Common.escapeHtml(s.name)}</td>
+          <td>${Common.escapeHtml(s.spec || '')}</td>
+          <td>${Common.escapeHtml(s.unit || '')}</td>
+          <td>${Common.escapeHtml(s.purchase_unit || s.unit || '')}</td>
+          <td>${(s.convert_ratio || 1) > 1 ? '1'+(s.purchase_unit||s.unit||'')+'='+(s.convert_ratio||1)+(s.unit||'') : '-'}</td>
+          <td>${Common.escapeHtml(s.category || '')}</td>
+          <td>${s.safety_stock || 0}</td>
+          <td><span class="badge ${s.status === 'active' ? 'badge-success' : 'badge-default'}">${s.status === 'active' ? '启用' : '停用'}</span></td>
+          <td><button class="btn btn-default btn-sm" onclick="editSupply('${s.id}')">编辑</button></td>
+        </tr>`).join('');
+    }
+
+    function showSupplyModal(supply) {
+      document.getElementById('modalTitle').textContent = supply ? '编辑用品' : '新增用品';
+      document.getElementById('modalBody').innerHTML = `
+        <div class="form-group"><label>编号</label><input type="text" id="s_code" value="${supply?.code || ''}"></div>
+        <div class="form-group"><label>名称 *</label><input type="text" id="s_name" value="${supply?.name || ''}"></div>
+        <div class="form-group"><label>规格型号</label><input type="text" id="s_spec" value="${supply?.spec || ''}"></div>
+        <div class="form-row">
+          <div class="form-group"><label>领用单位 *</label><input type="text" id="s_unit" value="${supply?.unit || ''}" placeholder="如：只、副、顶（员工领用时的单位）"></div>
+          <div class="form-group"><label>采购单位</label><input type="text" id="s_purchase_unit" value="${supply?.purchase_unit || supply?.unit || ''}" placeholder="如：盒、箱（采购时的单位）"></div>
+          <div class="form-group"><label>换算比例</label><input type="number" id="s_convert_ratio" value="${supply?.convert_ratio || 1}" min="1" placeholder="1采购单位=X领用单位"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>安全库存</label><input type="number" id="s_safety" value="${supply?.safety_stock || 0}"></div>
+          <div class="form-group"><label>分类</label><input type="text" id="s_category" value="${supply?.category || ''}" placeholder="如：头部防护"></div>
+        </div>
+        <div class="form-group"><label>状态</label><select id="s_status"><option value="active" ${supply?.status !== 'inactive' ? 'selected' : ''}>启用</option><option value="inactive" ${supply?.status === 'inactive' ? 'selected' : ''}>停用</option></select></div>`;
+      document.getElementById('modalConfirm').onclick = async () => {
+        const name = document.getElementById('s_name').value.trim();
+        if (!name) { Common.toast('请填写名称', 'error'); return; }
+        const unit = document.getElementById('s_unit').value.trim();
+        const purchaseUnit = document.getElementById('s_purchase_unit').value.trim() || unit;
+        const convertRatio = parseInt(document.getElementById('s_convert_ratio').value) || 1;
+        const data = {
+          code: document.getElementById('s_code').value.trim(),
+          name, spec: document.getElementById('s_spec').value.trim(),
+          unit, purchase_unit: purchaseUnit, convert_ratio: convertRatio,
+          category: document.getElementById('s_category').value.trim(),
+          safety_stock: parseInt(document.getElementById('s_safety').value) || 0,
+          status: document.getElementById('s_status').value
+        };
+        if (supply) {
+          await supabase.from('supplies').update(data).eq('id', supply.id);
+          await Auth.logAction(user, 'edit_supply', 'supplies', supply.id, name);
+        } else {
+          const { data: newS } = await supabase.from('supplies').insert(data).select('id').single();
+          await Auth.logAction(user, 'add_supply', 'supplies', newS.id, name);
+        }
+        Common.toast('保存成功', 'success');
+        closeModal();
+        loadSuppliesAdmin();
+      };
+      document.getElementById('modal').style.display = 'flex';
+    }
+    function editSupply(id) { showSupplyModal(allSupplies.find(s => s.id === id)); }
+
+    // 导出用品模板（含现有数据，方便批量修改采购单位和换算比例后重新导入）
+    async function exportSuppliesTemplate() {
+      if (allSupplies.length === 0) await loadSuppliesAdmin();
+      let csv = '\ufeff编号,名称,规格型号,领用单位,采购单位,换算比例,分类,安全库存\n';
+      (allSupplies || []).forEach(s => {
+        csv += `${s.code || ''},${s.name || ''},${s.spec || ''},${s.unit || ''},${s.purchase_unit || s.unit || ''},${s.convert_ratio || 1},${s.category || ''},${s.safety_stock || 0}\n`;
+      });
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = '用品导入模板_含现有数据.csv';
+      link.click();
+      Common.toast('已导出，修改后重新导入即可覆盖', 'success');
+    }
+
+    async function importSupplies(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      // 读取为ArrayBuffer，自动识别UTF-8/GBK编码
+      const buffer = await file.arrayBuffer();
+      let text;
+      try {
+        text = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+      } catch (e) {
+        text = new TextDecoder('gbk').decode(buffer);
+      }
+      if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+      const lines = text.split('\n').filter(l => l.trim());
+      if (lines.length < 2) { Common.toast('文件没有数据行', 'error'); return; }
+      const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+      const records = lines.slice(1).map(line => {
+        const cols = line.split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+        const obj = {};
+        headers.forEach((h, i) => obj[h] = cols[i]);
+        return obj;
+      });
+
+      // 先查出所有已有用品的编号，检测是否有重复
+      const { data: existing } = await supabase.from('supplies').select('id, code, name');
+      const codeMap = {};
+      (existing || []).forEach(s => { if (s.code) codeMap[s.code] = s; });
+
+      // 统计重复编号
+      const duplicateCodes = [];
+      records.forEach(r => {
+        const code = r['编号'] || r['code'] || '';
+        if (code && codeMap[code]) duplicateCodes.push(code);
+      });
+
+      // 有重复编号时弹出确认框
+      if (duplicateCodes.length > 0) {
+        const sample = duplicateCodes.slice(0, 5).join('、');
+        const more = duplicateCodes.length > 5 ? `等${duplicateCodes.length}个` : '';
+        const confirmed = confirm(`检测到 ${duplicateCodes.length} 条用品编号已存在（${sample}${more}），导入后将覆盖这些用品的名称、规格等信息。\n\n是否确认导入？`);
+        if (!confirmed) { event.target.value = ''; return; }
+      }
+
+      Common.showLoading(`导入中（${records.length}条）...`);
+      let added = 0, updated = 0, failed = 0;
+      const failedNames = [];
+      for (const r of records) {
+        const code = r['编号'] || r['code'] || '';
+        const name = r['名称'] || r['name'] || '';
+        if (!name) { failed++; failedNames.push('(名称为空)'); continue; }
+        const unit = r['单位'] || r['领用单位'] || r['unit'] || '';
+        const purchaseUnit = r['采购单位'] || r['purchase_unit'] || unit;
+        const convertRatio = parseInt(r['换算比例'] || r['convert_ratio'] || '1') || 1;
+        const payload = {
+          code,
+          name,
+          spec: r['规格型号'] || r['spec'] || '',
+          unit,
+          purchase_unit: purchaseUnit,
+          convert_ratio: convertRatio,
+          category: r['分类'] || r['category'] || '',
+          safety_stock: parseInt(r['安全库存'] || r['safety_stock'] || '0') || 0,
+          status: 'active'
+        };
+        if (code && codeMap[code]) {
+          const { error } = await supabase.from('supplies').update(payload).eq('id', codeMap[code].id);
+          if (error) { failed++; failedNames.push(name + '(' + error.message + ')'); }
+          else updated++;
+        } else {
+          const { error } = await supabase.from('supplies').insert(payload);
+          if (error) { failed++; failedNames.push(name + '(' + error.message + ')'); }
+          else added++;
+        }
+      }
+      Common.hideLoading();
+      if (failed > 0) {
+        Common.toast(`导入完成：新增${added}条，覆盖${updated}条，失败${failed}条`, 'warning');
+        console.warn('导入失败明细:', failedNames);
+      } else {
+        Common.toast(`导入完成：新增${added}条，覆盖${updated}条`, 'success');
+      }
+      loadSuppliesAdmin();
+      event.target.value = '';
+    }
+
+    // ===== 产线/班组 =====
+    async function loadLinesAdmin() {
+      const { data: lines } = await supabase.from('production_lines').select('*').order('name');
+      allLines = lines || [];
+      const { data: teams } = await supabase.from('teams').select('*').order('name');
+      allTeams = teams || [];
+
+      document.getElementById('linesList').innerHTML = allLines.map(line => {
+        const lineTeams = allTeams.filter(t => t.line_id === line.id);
+        return `
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <strong>${Common.escapeHtml(line.name)}（${Common.escapeHtml(line.code || '')}）</strong>
+            <div>
+              <button class="btn btn-default btn-sm" onclick="editLine('${line.id}')">编辑</button>
+              <button class="btn btn-default btn-sm" onclick="showTeamModal('${line.id}')">+ 班组</button>
+              <button class="btn btn-primary btn-sm" onclick="showQrCode('${line.qr_token}', '${Common.escapeHtml(line.name)}')">查看二维码</button>
+            </div>
+          </div>
+          <div style="margin-top:8px;font-size:13px;color:#666;">
+            班组：${lineTeams.length === 0 ? '无' : lineTeams.map(t => `${Common.escapeHtml(t.name)}${t.status === 'inactive' ? '(停用)' : ''}<button class="btn btn-link btn-sm" style="padding:0 4px;font-size:12px;" onclick="editTeam('${t.id}')">改</button>`).join('、')}
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    function editLine(lineId) {
+      const line = allLines.find(l => l.id === lineId);
+      if (!line) return;
+      document.getElementById('modalTitle').textContent = '编辑产线';
+      document.getElementById('modalBody').innerHTML = `
+        <div class="form-group"><label>产线名称 *</label><input type="text" id="l_name" value="${Common.escapeHtml(line.name)}"></div>
+        <div class="form-group"><label>编号</label><input type="text" id="l_code" value="${Common.escapeHtml(line.code || '')}"></div>
+        <p style="font-size:12px;color:#999;">修改名称不影响二维码，二维码 token 保持不变。</p>`;
+      document.getElementById('modalConfirm').onclick = async () => {
+        const name = document.getElementById('l_name').value.trim();
+        if (!name) { Common.toast('请填写名称', 'error'); return; }
+        await supabase.from('production_lines').update({ name, code: document.getElementById('l_code').value.trim() }).eq('id', lineId);
+        await Auth.logAction(user, 'edit_line', 'production_lines', lineId, name);
+        Common.toast('已保存', 'success');
+        closeModal();
+        loadLinesAdmin();
+      };
+      document.getElementById('modal').style.display = 'flex';
+    }
+
+    function showLineModal() {
+      document.getElementById('modalTitle').textContent = '新增产线';
+      document.getElementById('modalBody').innerHTML = `
+        <div class="form-group"><label>产线名称 *</label><input type="text" id="l_name"></div>
+        <div class="form-group"><label>编号</label><input type="text" id="l_code"></div>`;
+      document.getElementById('modalConfirm').onclick = async () => {
+        const name = document.getElementById('l_name').value.trim();
+        if (!name) { Common.toast('请填写名称', 'error'); return; }
+        const token = 'line-' + Math.random().toString(36).substring(2, 10);
+        await supabase.from('production_lines').insert({ name, code: document.getElementById('l_code').value.trim(), qr_token: token });
+        await Auth.logAction(user, 'add_line', 'production_lines', null, name);
+        Common.toast('产线已添加', 'success');
+        closeModal();
+        loadLinesAdmin();
+      };
+      document.getElementById('modal').style.display = 'flex';
+    }
+
+    function editTeam(teamId) {
+      const team = allTeams.find(t => t.id === teamId);
+      if (!team) return;
+      document.getElementById('modalTitle').textContent = '编辑班组';
+      document.getElementById('modalBody').innerHTML = `
+        <div class="form-group"><label>班组名称 *</label><input type="text" id="t_name" value="${Common.escapeHtml(team.name)}"></div>
+        <div class="form-group"><label>状态</label><select id="t_status"><option value="active" ${team.status !== 'inactive' ? 'selected' : ''}>启用</option><option value="inactive" ${team.status === 'inactive' ? 'selected' : ''}>停用</option></select></div>
+        <p style="font-size:12px;color:#999;">停用后该班组的班组长无法登录，员工领用时也不会显示该班组长。</p>`;
+      document.getElementById('modalConfirm').onclick = async () => {
+        const name = document.getElementById('t_name').value.trim();
+        if (!name) { Common.toast('请填写名称', 'error'); return; }
+        await supabase.from('teams').update({ name, status: document.getElementById('t_status').value }).eq('id', teamId);
+        await Auth.logAction(user, 'edit_team', 'teams', teamId, name);
+        Common.toast('已保存', 'success');
+        closeModal();
+        loadLinesAdmin();
+      };
+      document.getElementById('modal').style.display = 'flex';
+    }
+
+    function showTeamModal(lineId) {
+      document.getElementById('modalTitle').textContent = '新增班组';
+      document.getElementById('modalBody').innerHTML = `
+        <div class="form-group"><label>班组名称 *</label><input type="text" id="t_name" placeholder="如：1班组"></div>`;
+      document.getElementById('modalConfirm').onclick = async () => {
+        const name = document.getElementById('t_name').value.trim();
+        if (!name) { Common.toast('请填写名称', 'error'); return; }
+        await supabase.from('teams').insert({ line_id: lineId, name });
+        await Auth.logAction(user, 'add_team', 'teams', null, name);
+        Common.toast('班组已添加', 'success');
+        closeModal();
+        loadLinesAdmin();
+      };
+      document.getElementById('modal').style.display = 'flex';
+    }
+
+    function showQrCode(token, lineName) {
+      const url = window.location.origin + window.location.pathname.replace('admin.html', '') + 'employee.html?line=' + token;
+      document.getElementById('modalTitle').textContent = lineName + ' - 领用二维码';
+      document.getElementById('modalBody').innerHTML = `
+        <p style="font-size:13px;color:#666;margin-bottom:8px;">员工扫码进入领用页面（请将此二维码打印张贴到产线物料点）</p>
+        <p style="font-size:12px;color:#999;word-break:break-all;margin-bottom:8px;">${url}</p>
+        <div style="text-align:center;"><img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(url)}" style="border:1px solid #ddd;padding:10px;background:#fff;"></div>
+        <p style="text-align:center;margin-top:8px;"><button class="btn btn-primary btn-sm" onclick="window.open('https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(url)}')">下载高清二维码</button></p>`;
+      document.getElementById('modalConfirm').style.display = 'none';
+      document.getElementById('modal').style.display = 'flex';
+      // 恢复确认按钮
+      setTimeout(() => { document.getElementById('modalConfirm').style.display = ''; }, 100);
+    }
+
+    // ===== 账号管理 =====
+    async function loadUsersAdmin() {
+      const { data } = await supabase.from('users').select('*').order('created_at', { ascending: false });
+      document.querySelector('#userTable tbody').innerHTML = (data || []).map(u => {
+        const line = allLines.find(l => l.id === u.line_id);
+        const team = allTeams.find(t => t.id === u.team_id);
+        const roleText = u.role === 'admin' ? '管理员' : u.role === 'line_leader' ? '线长' : '班组长';
+        return `<tr>
+          <td>${Common.escapeHtml(u.username)}</td>
+          <td>${Common.escapeHtml(u.name)}</td>
+          <td><span class="badge badge-info">${roleText}</span></td>
+          <td>${line ? Common.escapeHtml(line.name) : '-'}</td>
+          <td>${team ? Common.escapeHtml(team.name) : '-'}</td>
+          <td><span class="badge ${u.status === 'active' ? 'badge-success' : 'badge-default'}">${u.status === 'active' ? '启用' : '停用'}</span></td>
+          <td>
+            <button class="btn btn-default btn-sm" onclick="resetPwd('${u.id}')">重置密码</button>
+            <button class="btn btn-${u.status === 'active' ? 'warning' : 'success'} btn-sm" onclick="toggleUser('${u.id}', '${u.status}')">${u.status === 'active' ? '停用' : '启用'}</button>
+          </td>
+        </tr>`;
+      }).join('');
+    }
+
+    function showUserModal() {
+      if (allLines.length === 0) loadLinesAdmin();
+      document.getElementById('modalTitle').textContent = '新增账号';
+      document.getElementById('modalBody').innerHTML = `
+        <div class="form-group"><label>用户名 *</label><input type="text" id="u_username"></div>
+        <div class="form-group"><label>密码 *</label><input type="password" id="u_password" value="123456"></div>
+        <div class="form-group"><label>姓名 *</label><input type="text" id="u_name"></div>
+        <div class="form-group"><label>角色 *</label><select id="u_role" onchange="onRoleChange()"><option value="line_leader">线长</option><option value="team_leader">班组长</option><option value="admin">管理员</option></select></div>
+        <div class="form-group" id="lineGroup"><label>产线</label><select id="u_line"><option value="">请选择</option>${allLines.map(l => `<option value="${l.id}">${Common.escapeHtml(l.name)}</option>`).join('')}</select></div>
+        <div class="form-group" id="teamGroup"><label>班组</label><select id="u_team"><option value="">请选择</option></select></div>`;
+      document.getElementById('u_line').onchange = function() {
+        const teams = allTeams.filter(t => t.line_id === this.value);
+        document.getElementById('u_team').innerHTML = '<option value="">请选择</option>' + teams.map(t => `<option value="${t.id}">${Common.escapeHtml(t.name)}</option>`).join('');
+      };
+      window.onRoleChange = function() {
+        const role = document.getElementById('u_role').value;
+        document.getElementById('lineGroup').style.display = role === 'admin' ? 'none' : '';
+        document.getElementById('teamGroup').style.display = role === 'team_leader' ? '' : 'none';
+      };
+      window.onRoleChange();
+      document.getElementById('modalConfirm').onclick = async () => {
+        const username = document.getElementById('u_username').value.trim();
+        const password = document.getElementById('u_password').value;
+        const name = document.getElementById('u_name').value.trim();
+        const role = document.getElementById('u_role').value;
+        if (!username || !password || !name) { Common.toast('请填写完整', 'error'); return; }
+        const salt = Auth.generateSalt();
+        const hashed = await Auth.hashPassword(password, salt);
+        const data = { username, password: hashed, salt, name, role, status: 'active' };
+        if (role !== 'admin') {
+          data.line_id = document.getElementById('u_line').value || null;
+          if (role === 'team_leader') data.team_id = document.getElementById('u_team').value || null;
+        }
+        try {
+          await supabase.from('users').insert(data);
+          await Auth.logAction(user, 'add_user', 'users', null, username + '(' + name + ')');
+          Common.toast('账号已创建', 'success');
+          closeModal();
+          loadUsersAdmin();
+        } catch (e) {
+          Common.toast('创建失败：用户名可能已存在', 'error');
+        }
+      };
+      document.getElementById('modal').style.display = 'flex';
+    }
+
+    async function resetPwd(userId) {
+      if (!Common.confirm('确认重置密码为 123456？')) return;
+      // 查询用户现有salt，没有则生成新的
+      const { data: u } = await supabase.from('users').select('salt').eq('id', userId).single();
+      const salt = u?.salt || Auth.generateSalt();
+      const hashed = await Auth.hashPassword('123456', salt);
+      await supabase.from('users').update({ password: hashed, salt }).eq('id', userId);
+      await Auth.logAction(user, 'reset_pwd', 'users', userId, '重置密码');
+      Common.toast('密码已重置为 123456', 'success');
+    }
+
+    async function toggleUser(userId, currentStatus) {
+      const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
+      await supabase.from('users').update({ status: newStatus }).eq('id', userId);
+      await Auth.logAction(user, 'toggle_user', 'users', userId, newStatus === 'active' ? '启用' : '停用');
+      Common.toast('操作成功', 'success');
+      loadUsersAdmin();
+    }
+
+    // ===== 需求单管理 =====
+    async function loadDemandsAdmin() {
+      const status = document.getElementById('demandFilter').value;
+      let query = supabase.from('demand_orders').select('*, demand_order_items(*), production_lines(name), users!leader_id(name)').order('created_at', { ascending: false }).limit(50);
+      if (status) query = query.eq('status', status);
+      const { data } = await query;
+
+      document.getElementById('demandsAdminList').innerHTML = (data || []).map(d => {
+        const statusBadge = d.status === 'done' ? 'badge-success' : d.status === 'cancelled' ? 'badge-default' : d.status === 'admin_signed' ? 'badge-info' : 'badge-warning';
+        return `
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <strong>${d.production_lines?.name || ''} - ${d.apply_month}</strong>
+            <span class="badge ${statusBadge}">${Common.statusText(d.status)}</span>
+          </div>
+          <div style="font-size:12px;color:#999;margin-top:4px;">${d.order_no} · 提报：${d.users?.name || ''} · ${Common.formatDate(d.apply_date)}</div>
+          <div style="margin-top:8px;font-size:13px;">
+            ${d.demand_order_items.map(item => `${item.demand_qty}× ${allSupplies.find(s=>s.id===item.supply_id)?.name || ''}`).join('、')}
+          </div>
+          <div class="btn-group" style="margin-top:8px;">
+            <button class="btn btn-default btn-sm" onclick="showDemandDetailAdmin('${d.id}')">详情/打印</button>
+            ${d.status === 'submitted' ? `<button class="btn btn-success btn-sm" onclick="adminSign('${d.id}')">签名发放</button>` : ''}
+            ${d.status === 'admin_signed' ? `<button class="btn btn-danger btn-sm" onclick="cancelAdminSign('${d.id}')">撤回在途</button>` : ''}
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    async function adminSign(orderId) {
+      const { data } = await supabase.from('demand_orders').select('*, demand_order_items(*), production_lines(name)').eq('id', orderId).single();
+      currentSignOrder = data;
+      document.getElementById('signDetail').innerHTML = `
+        <div><strong>产线：</strong>${data.production_lines?.name || ''}</div>
+        <div><strong>申领月份：</strong>${data.apply_month}</div>
+        <div><strong>单号：</strong>${data.order_no}</div>
+        <table class="data-table" style="margin-top:8px;">
+          <thead><tr><th>用品</th><th>数量</th><th>单位</th></tr></thead>
+          <tbody>${data.demand_order_items.map(item => `<tr><td>${allSupplies.find(s=>s.id===item.supply_id)?.name || ''}</td><td>${item.demand_qty}</td><td>${item.unit||''}</td></tr>`).join('')}</tbody>
+        </table>`;
+      document.getElementById('signModal').style.display = 'flex';
+      setTimeout(() => { adminSigPad = new SignaturePad('adminSigCanvas'); }, 100);
+    }
+
+    async function confirmAdminSign() {
+      if (!adminSigPad || adminSigPad.isEmpty()) { Common.toast('请先签名', 'error'); return; }
+      await supabase.from('demand_orders').update({
+        status: 'admin_signed',
+        admin_sign: adminSigPad.toDataURL(),
+        admin_sign_at: new Date().toISOString()
+      }).eq('id', currentSignOrder.id);
+      await Auth.logAction(user, 'admin_sign', 'demand_orders', currentSignOrder.id, '签名发放');
+      Common.toast('已签名发放', 'success');
+      closeSignModal();
+      loadDemandsAdmin();
+    }
+
+    async function cancelAdminSign(orderId) {
+      if (!Common.confirm('确认撤回该在途单？')) return;
+      await supabase.from('demand_orders').update({ status: 'submitted', admin_sign: null, admin_sign_at: null }).eq('id', orderId);
+      await Auth.logAction(user, 'cancel_admin_sign', 'demand_orders', orderId, '撤回到途单');
+      Common.toast('已撤回', 'success');
+      loadDemandsAdmin();
+    }
+
+    // 管理员端需求单详情
+    async function showDemandDetailAdmin(orderId) {
+      const { data: d } = await supabase
+        .from('demand_orders')
+        .select('*, demand_order_items(*), production_lines(name), users!leader_id(name)')
+        .eq('id', orderId).single();
+
+      const receiveText = d.receive_type === 'full' ? '全部领用' : d.receive_type === 'partial' ? '部分领用' : '—';
+      const html = `
+        <div style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:300;display:flex;align-items:center;justify-content:center;padding:16px;">
+          <div class="card" style="max-width:650px;width:100%;max-height:90vh;overflow-y:auto;">
+            <h3>需求单详情</h3>
+            <div><strong>单号：</strong>${d.order_no}</div>
+            <div><strong>产线：</strong>${d.production_lines?.name || ''}</div>
+            <div><strong>申领月份：</strong>${d.apply_month}</div>
+            <div><strong>申购人：</strong>${d.users?.name || ''}</div>
+            <div><strong>申购日期：</strong>${Common.formatDate(d.apply_date)}</div>
+            <div><strong>状态：</strong>${Common.statusText(d.status)}</div>
+            <table class="data-table" style="margin-top:12px;">
+              <thead><tr><th>序号</th><th>用品</th><th>规格</th><th>申请数量</th><th>实际入库</th><th>单位</th><th>库存快照</th><th>备注</th></tr></thead>
+              <tbody>${d.demand_order_items.map((item, i) => {
+                const supply = allSupplies.find(s=>s.id===item.supply_id);
+                return `<tr><td>${i+1}</td><td>${supply?.name || ''}</td><td>${supply?.spec || ''}</td><td>${item.demand_qty}</td><td>${item.actual_qty}</td><td>${item.unit||''}</td><td>${item.stock_snapshot ?? 0}</td><td>${Common.escapeHtml(item.note||'')}</td></tr>`;
+              }).join('')}</tbody>
+            </table>
+            ${d.admin_sign ? `<div style="margin-top:12px;"><strong>管理员签名：</strong>${Common.formatDateTime(d.admin_sign_at)}<br><img src="${d.admin_sign}" style="max-width:150px;border:1px solid #eee;margin-top:4px;"></div>` : ''}
+            ${d.leader_sign ? `<div style="margin-top:8px;"><strong>领用情况：</strong>${receiveText}</div><div><strong>线长签名：</strong>${Common.formatDateTime(d.leader_sign_at)}<br><img src="${d.leader_sign}" style="max-width:150px;border:1px solid #eee;margin-top:4px;"></div>` : ''}
+            <div class="btn-group" style="margin-top:16px;">
+              <button class="btn btn-default" onclick="this.closest('div[style*=position]').remove()">关闭</button>
+              <button class="btn btn-primary" onclick="printDemandAdmin('${d.id}')">导出打印</button>
+            </div>
+          </div>
+        </div>`;
+      const div = document.createElement('div');
+      div.innerHTML = html;
+      document.body.appendChild(div);
+    }
+
+    async function printDemandAdmin(orderId) {
+      const { data: d } = await supabase
+        .from('demand_orders')
+        .select('*, demand_order_items(*), production_lines(name), users!leader_id(name)')
+        .eq('id', orderId).single();
+
+      const receiveText = d.receive_type === 'full' ? '☑ 全部领用  ☐ 部分领用' : d.receive_type === 'partial' ? '☐ 全部领用  ☑ 部分领用' : '☐ 全部领用  ☐ 部分领用';
+      const leaderName = d.leader_sign ? (d.users?.name || '') : '____________';
+      const receiveDate = d.leader_sign_at ? Common.formatDate(d.leader_sign_at) : '____年__月__日';
+      const monthNum = d.apply_month ? d.apply_month.split('-')[1]?.replace(/^0/, '') || d.apply_month : '';
+      const logoUrl = new URL('images/logo.png', window.location.href).href;
+
+      Common.printHTML(`
+        <div style="display:flex;align-items:center;margin-bottom:16px;">
+          <div style="flex:0 0 140px;"><img src="${logoUrl}" style="max-height:50px;"></div>
+          <div style="flex:1;text-align:center;">
+            <h2 style="margin:0;font-size:22px;letter-spacing:2px;">&nbsp;&nbsp;${monthNum}月劳动防护用品需求表</h2>
+          </div>
+          <div style="flex:0 0 140px;"></div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:0;" border="1">
+          <tr>
+            <td style="padding:8px;width:33%;">部门/产线：&nbsp;&nbsp;${d.production_lines?.name || ''}</td>
+            <td style="padding:8px;width:33%;">申购人：&nbsp;&nbsp;${d.users?.name || ''}</td>
+            <td style="padding:8px;width:34%;">申购日期：&nbsp;&nbsp;${Common.formatDate(d.apply_date)}</td>
+          </tr>
+        </table>
+        <table style="width:100%;border-collapse:collapse;" border="1">
+          <thead><tr style="background:#f5f5f5;">
+            <th style="padding:8px;width:5%;">序号</th>
+            <th style="padding:8px;width:20%;">劳动防护用品名称</th>
+            <th style="padding:8px;width:18%;">规格型号</th>
+            <th style="padding:8px;width:12%;">申请数量</th>
+            <th style="padding:8px;width:7%;">单位</th>
+            <th style="padding:8px;width:12%;">现有库存</th>
+            <th style="padding:8px;width:16%;">备注</th>
+          </tr></thead>
+          <tbody>${d.demand_order_items.map((item, i) => {
+            const supply = allSupplies.find(s=>s.id===item.supply_id);
+            return `<tr>
+              <td style="text-align:center;padding:8px;">${i+1}</td>
+              <td style="padding:8px;">${supply?.name || ''}</td>
+              <td style="padding:8px;">${supply?.spec || ''}</td>
+              <td style="text-align:center;padding:8px;">${item.demand_qty}</td>
+              <td style="text-align:center;padding:8px;">${item.unit||''}</td>
+              <td style="text-align:center;padding:8px;">${item.stock_snapshot ?? 0}</td>
+              <td style="padding:8px;">${Common.escapeHtml(item.note||'')}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>
+        <div style="margin-top:20px;">领用情况：${receiveText}</div>
+        <div style="display:flex;justify-content:space-between;margin-top:16px;">
+          <span>领用人（线长签名）：${leaderName}</span>
+          <span>领用日期：${receiveDate}</span>
+        </div>
+        ${d.leader_sign ? `<div style="margin-top:8px;"><img src="${d.leader_sign}" style="max-width:150px;"></div>` : ''}
+      `);
+    }
+
+    // ===== 临时采购 =====
+    async function loadTempAdmin() {
+      const { data } = await supabase.from('temp_purchases').select('*, temp_purchase_items(*), production_lines(name), users(name)').order('created_at', { ascending: false }).limit(50);
+      document.getElementById('tempAdminList').innerHTML = (data || []).map(t => {
+        const statusBadge = t.status === 'stocked' ? 'badge-success' : t.status === 'cancelled' ? 'badge-default' : 'badge-warning';
+        return `
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <strong>${t.production_lines?.name || ''} - 临时采购</strong>
+            <span class="badge ${statusBadge}">${Common.statusText(t.status)}</span>
+          </div>
+          <div style="font-size:12px;color:#999;margin-top:4px;">${t.temp_no} · 申请：${t.users?.name || ''} · ${Common.formatDateTime(t.created_at)}</div>
+          <div style="font-size:13px;margin-top:4px;"><strong>原因：</strong>${Common.escapeHtml(t.reason || '')}</div>
+          <div style="margin-top:8px;font-size:13px;">
+            ${t.temp_purchase_items.map(item => `${item.qty}× ${allSupplies.find(s=>s.id===item.supply_id)?.name || ''}`).join('、')}
+          </div>
+          ${t.status === 'applied' ? `<div class="btn-group" style="margin-top:8px;"><button class="btn btn-success btn-sm" onclick="stockTemp('${t.id}')">确认入库</button></div>` : ''}
+        </div>`;
+      }).join('');
+    }
+
+    async function stockTemp(tempId) {
+      if (!Common.confirm('确认入库？库存将增加到对应产线。')) return;
+      Common.showLoading('入库中...');
+      try {
+        const { data: temp } = await supabase.from('temp_purchases').select('*, temp_purchase_items(*)').eq('id', tempId).single();
+        for (const item of temp.temp_purchase_items) {
+          const supply = allSupplies.find(s => s.id === item.supply_id);
+          const convertRatio = supply?.convert_ratio || 1;
+          const issueQty = item.qty * convertRatio; // 换算成领用单位
+          const { data: stock } = await supabase.from('supply_stock').select('quantity, id').eq('supply_id', item.supply_id).eq('line_id', temp.line_id).maybeSingle();
+          let newBalance;
+          if (stock) {
+            newBalance = stock.quantity + issueQty;
+            await supabase.from('supply_stock').update({ quantity: newBalance }).eq('id', stock.id);
+          } else {
+            const { data: ns } = await supabase.from('supply_stock').insert({ supply_id: item.supply_id, line_id: temp.line_id, quantity: issueQty }).select('id').single();
+            newBalance = issueQty;
+          }
+          await supabase.from('stock_records').insert({
+            line_id: temp.line_id, supply_id: item.supply_id,
+            change_type: 'temp_in', change_qty: issueQty, balance: newBalance,
+            ref_type: 'temp_purchase', ref_id: temp.id,
+            operator_id: user.id, operator_name: user.name
+          });
+        }
+        await supabase.from('temp_purchases').update({ status: 'stocked', stocker_id: user.id, stocked_at: new Date().toISOString() }).eq('id', tempId);
+        await Auth.logAction(user, 'stock_temp', 'temp_purchases', tempId, '临时采购入库');
+        Common.toast('入库成功', 'success');
+        loadTempAdmin();
+      } catch (e) {
+        Common.toast('入库失败：' + e.message, 'error');
+      }
+      Common.hideLoading();
+    }
+
+    // ===== 全厂库存 =====
+    async function loadAllStock() {
+      if (allSupplies.length === 0) await loadSuppliesAdmin();
+      const { data: stocks } = await supabase.from('supply_stock').select('*, supplies(*)').order('supply_id');
+      // 按用品分组，列各产线
+      const bySupply = {};
+      (stocks || []).forEach(s => {
+        if (!bySupply[s.supply_id]) bySupply[s.supply_id] = { supply: s.supplies, lines: {} };
+        const line = allLines.find(l => l.id === s.line_id);
+        bySupply[s.supply_id].lines[line?.name || s.line_id] = s.quantity;
+      });
+
+      const lineNames = allLines.map(l => l.name);
+      const thead = `<thead><tr><th>用品</th><th>规格</th><th>单位</th>${lineNames.map(n => `<th>${Common.escapeHtml(n)}</th>`).join('')}<th>合计</th></tr></thead>`;
+      const tbody = `<tbody>${Object.values(bySupply).map(g => {
+        const total = Object.values(g.lines).reduce((a, b) => a + b, 0);
+        const unit = g.supply?.unit || '';
+        const purchaseUnit = g.supply?.purchase_unit || unit;
+        const convertRatio = g.supply?.convert_ratio || 1;
+        const unitDisplay = convertRatio > 1 ? `${unit}（1${purchaseUnit}=${convertRatio}${unit}）` : unit;
+        return `<tr><td>${Common.escapeHtml(g.supply?.name || '')}</td><td>${Common.escapeHtml(g.supply?.spec || '')}</td><td>${Common.escapeHtml(unitDisplay)}</td>${lineNames.map(n => `<td>${g.lines[n] || 0}</td>`).join('')}<td><strong>${total}</strong></td></tr>`;
+      }).join('')}</tbody>`;
+      document.querySelector('#allStockTable thead').innerHTML = thead;
+      document.querySelector('#allStockTable tbody').innerHTML = tbody;
+
+      // 填充流水筛选产线下拉
+      const lineSel = document.getElementById('logLineFilter');
+      if (lineSel.options.length <= 1) {
+        lineSel.innerHTML = '<option value="">全部</option>' + allLines.map(l => `<option value="${l.id}">${Common.escapeHtml(l.name)}</option>`).join('');
+      }
+      loadAllStockRecords();
+    }
+
+    async function loadAllStockRecords() {
+      const lineFilter = document.getElementById('logLineFilter').value;
+      const typeFilter = document.getElementById('logTypeFilter').value;
+      let query = supabase.from('stock_records')
+        .select('*, supplies(name, spec, unit), production_lines(name)')
+        .order('created_at', { ascending: false })
+        .limit(200);
+      if (lineFilter) query = query.eq('line_id', lineFilter);
+      if (typeFilter) query = query.eq('change_type', typeFilter);
+      const { data } = await query;
+
+      const typeText = { in: '月度入库', temp_in: '临时入库', out: '领用出库', adjust: '盘点调整' };
+      document.getElementById('allStockRecordsList').innerHTML = (data || []).length === 0
+        ? '<p style="color:#999;">暂无流水记录</p>'
+        : `<div class="table-wrapper"><table class="data-table"><thead><tr><th>时间</th><th>产线</th><th>用品</th><th>类型</th><th>变动</th><th>结存</th><th>操作人</th></tr></thead><tbody>${(data || []).map(r => `<tr><td>${Common.formatDateTime(r.created_at)}</td><td>${Common.escapeHtml(r.production_lines?.name || '')}</td><td>${Common.escapeHtml(r.supplies?.name || '')}</td><td>${typeText[r.change_type] || r.change_type}</td><td style="color:${r.change_qty > 0 ? '#2e7d32' : '#c62828'};font-weight:600;">${r.change_qty > 0 ? '+' : ''}${r.change_qty}</td><td>${r.balance}</td><td>${Common.escapeHtml(r.operator_name || '')}</td></tr>`).join('')}</tbody></table></div>`;
+    }
+
+    // ===== 报表中心 =====
+    let summaryData = null;
+    async function generateSummary() {
+      const month = document.getElementById('summaryMonth').value;
+      if (!month) { Common.toast('请选择月份', 'error'); return; }
+      Common.showLoading('生成中...');
+
+      // 获取所有产线
+      if (allLines.length === 0) {
+        const { data: lines } = await supabase.from('production_lines').select('*').eq('status', 'active').order('name');
+        allLines = lines || [];
+      }
+      const allLineNames = allLines.map(l => l.name);
+
+      const { data: orders } = await supabase
+        .from('demand_orders')
+        .select('*, demand_order_items(supply_id, demand_qty), production_lines(name)')
+        .eq('apply_month', month)
+        .in('status', ['submitted', 'admin_signed', 'done']);
+
+      // 已提交的产线集合
+      const submittedLines = new Set((orders || []).map(o => o.production_lines?.name));
+
+      // 按用品汇总各产线
+      const supplyMap = {};
+      (orders || []).forEach(order => {
+        const lineName = order.production_lines?.name || '未知';
+        order.demand_order_items.forEach(item => {
+          if (!supplyMap[item.supply_id]) supplyMap[item.supply_id] = {};
+          supplyMap[item.supply_id][lineName] = (supplyMap[item.supply_id][lineName] || 0) + item.demand_qty;
+        });
+      });
+
+      const rows = [];
+      for (const [supplyId, lineData] of Object.entries(supplyMap)) {
+        const supply = allSupplies.find(s => s.id === supplyId);
+        const total = Object.values(lineData).reduce((a, b) => a + b, 0);
+        rows.push({ name: supply?.name || supplyId, spec: supply?.spec || '', unit: supply?.unit || '', lines: lineData, total });
+      }
+      summaryData = { month, lineNames: allLineNames, submittedLines, rows };
+
+      const thead = `<thead><tr><th>用品名称</th><th>规格型号</th>${allLineNames.map(n => `<th>${Common.escapeHtml(n)}</th>`).join('')}<th>总计</th></tr></thead>`;
+      const tbody = `<tbody>${rows.map(r => `<tr><td>${Common.escapeHtml(r.name)}</td><td>${Common.escapeHtml(r.spec)}</td>${allLineNames.map(n => {
+        if (!submittedLines.has(n)) return '<td style="color:#999;font-style:italic;">未交</td>';
+        return `<td>${r.lines[n] || 0}</td>`;
+      }).join('')}<td><strong>${r.total}</strong></td></tr>`).join('')}</tbody>`;
+      document.getElementById('summaryArea').innerHTML = `
+        <h4 style="text-align:center;margin-bottom:8px;">${month} 劳动防护用品需求汇总表</h4>
+        <div class="table-wrapper"><table class="data-table">${thead}${tbody}</table></div>
+        <p style="font-size:12px;color:#999;margin-top:8px;">制表日期：${Common.formatDate(new Date())}</p>`;
+      Common.hideLoading();
+    }
+
+    function exportSummaryCSV() {
+      if (!summaryData) { Common.toast('请先生成汇总表', 'error'); return; }
+      const { month, lineNames, rows } = summaryData;
+      const headers = ['用品名称', '规格型号', ...lineNames, '总计'];
+      const data = rows.map(r => [r.name, r.spec, ...lineNames.map(n => r.lines[n] || 0), r.total]);
+      Common.exportCSV(`${month}需求汇总表.csv`, headers, data);
+    }
+
+    function printSummary() {
+      if (!summaryData) { Common.toast('请先生成汇总表', 'error'); return; }
+      const { month, lineNames, rows } = summaryData;
+      Common.printHTML(`
+        <h2>${month} 劳动防护用品需求汇总表</h2>
+        <table><thead><tr><th>用品名称</th><th>规格型号</th>${lineNames.map(n => `<th>${Common.escapeHtml(n)}</th>`).join('')}<th>总计</th></tr></thead>
+        <tbody>${rows.map(r => `<tr><td>${Common.escapeHtml(r.name)}</td><td>${Common.escapeHtml(r.spec)}</td>${lineNames.map(n => `<td>${r.lines[n] || 0}</td>`).join('')}<td>${r.total}</td></tr>`).join('')}</tbody></table>
+        <p style="text-align:right;margin-top:20px;">制表日期：${Common.formatDate(new Date())}</p>`);
+    }
+
+    // ===== 领用汇总统计 =====
+    let reqSummaryData = null;
+    async function generateReqSummary() {
+      const start = document.getElementById('reqStartDate').value;
+      const end = document.getElementById('reqEndDate').value;
+      const lineFilter = document.getElementById('reqLineFilter').value;
+      const workerFilter = document.getElementById('reqWorkerFilter').value;
+      if (!start || !end) { Common.toast('请选择日期范围', 'error'); return; }
+
+      Common.showLoading('统计中...');
+      let query = supabase.from('requisitions')
+        .select('*, requisition_items(*), production_lines(name)')
+        .eq('status', 'approved')
+        .gte('approved_at', start + 'T00:00:00')
+        .lte('approved_at', end + 'T23:59:59');
+      if (lineFilter) query = query.eq('line_id', lineFilter);
+      if (workerFilter) query = query.eq('worker_type', workerFilter);
+      const { data } = await query;
+
+      // 按用品+规格汇总
+      const map = {};
+      (data || []).forEach(req => {
+        req.requisition_items.forEach(item => {
+          const key = item.name + '|' + (item.spec || '');
+          if (!map[key]) map[key] = { name: item.name, spec: item.spec, unit: item.unit, qty: 0, formal: 0, labor: 0 };
+          map[key].qty += item.qty;
+          if (req.worker_type === 'formal') map[key].formal += item.qty;
+          else map[key].labor += item.qty;
+        });
+      });
+      reqSummaryData = Object.values(map);
+      const total = reqSummaryData.reduce((a, b) => a + b.qty, 0);
+
+      document.getElementById('reqSummaryArea').innerHTML = reqSummaryData.length === 0
+        ? '<p style="color:#999;">该时间段无领用记录</p>'
+        : `<div class="table-wrapper"><table class="data-table"><thead><tr><th>序号</th><th>用品名称</th><th>规格型号</th><th>单位</th><th>正式工</th><th>劳务工</th><th>合计</th></tr></thead><tbody>${reqSummaryData.map((r, i) => `<tr><td>${i+1}</td><td>${Common.escapeHtml(r.name)}</td><td>${Common.escapeHtml(r.spec||'')}</td><td>${Common.escapeHtml(r.unit||'')}</td><td>${r.formal}</td><td>${r.labor}</td><td><strong>${r.qty}</strong></td></tr>`).join('')}<tr style="font-weight:600;background:#f5f5f5;"><td colspan="6">总计</td><td>${total}</td></tr></tbody></table></div>`;
+      Common.hideLoading();
+    }
+
+    function exportReqSummary() {
+      if (!reqSummaryData) { Common.toast('请先生成统计', 'error'); return; }
+      const headers = ['用品名称', '规格型号', '单位', '正式工', '劳务工', '合计'];
+      const data = reqSummaryData.map(r => [r.name, r.spec || '', r.unit || '', r.formal, r.labor, r.qty]);
+      Common.exportCSV('领用汇总统计.csv', headers, data);
+    }
+
+    // ===== 个人领用明细查询 =====
+    async function searchEmpRequisitions() {
+      const name = document.getElementById('searchEmpName').value.trim();
+      const month = document.getElementById('searchEmpMonth').value;
+      if (!name) { Common.toast('请输入姓名', 'error'); return; }
+
+      Common.showLoading('查询中...');
+      let query = supabase.from('requisitions')
+        .select('*, requisition_items(*), production_lines(name), users!team_leader_id(name)')
+        .ilike('employee_name', `%${name}%`)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (month) query = query.gte('created_at', month + '-01T00:00:00').lte('created_at', month + '-31T23:59:59');
+      const { data } = await query;
+
+      document.getElementById('empReqArea').innerHTML = (data || []).length === 0
+        ? '<p style="color:#999;">未找到该员工的领用记录</p>'
+        : (data || []).map(req => `
+          <div class="card" style="margin-bottom:8px;">
+            <div style="display:flex;justify-content:space-between;">
+              <strong>${Common.escapeHtml(req.employee_name)}（${Common.workerTypeText(req.worker_type)}）</strong>
+              <span class="badge ${req.status === 'approved' ? 'badge-success' : req.status === 'rejected' ? 'badge-danger' : 'badge-warning'}">${Common.statusText(req.status)}</span>
+            </div>
+            <div style="font-size:12px;color:#999;margin-top:4px;">${req.req_no} · ${req.production_lines?.name || ''} · 班组长：${req.users?.name || ''} · ${Common.formatDateTime(req.created_at)}</div>
+            <div style="margin-top:6px;font-size:13px;">${req.requisition_items.map(item => `${Common.escapeHtml(item.name)} × ${item.qty}${item.unit || ''}`).join('、')}</div>
+          </div>`).join('');
+      Common.hideLoading();
+    }
+
+    // ===== 操作日志 =====
+    async function loadLogs() {
+      const { data } = await supabase.from('operation_logs').select('*').order('created_at', { ascending: false }).limit(100);
+      document.querySelector('#logTable tbody').innerHTML = (data || []).map(l => `
+        <tr>
+          <td>${Common.formatDateTime(l.created_at)}</td>
+          <td>${Common.escapeHtml(l.operator_name || '')}</td>
+          <td>${l.role || ''}</td>
+          <td>${l.action || ''}</td>
+          <td>${Common.escapeHtml(l.detail || '')}</td>
+        </tr>`).join('');
+    }
+
+    // 初始化
+    loadSuppliesAdmin();
+    loadLinesAdmin();
+    loadDashboard();
+    Auth.checkForceChangePassword();
+    // 填充领用汇总产线下拉
+    setTimeout(() => {
+      document.getElementById('reqLineFilter').innerHTML = '<option value="">全部</option>' + allLines.map(l => `<option value="${l.id}">${Common.escapeHtml(l.name)}</option>`).join('');
+    }, 500);
+
+    // ===== 库存调整审核 =====
+    async function loadAdjustments() {
+      const status = document.getElementById('adjStatusFilter').value;
+      let query = supabase.from('stock_adjustments')
+        .select('*, supplies(name, spec, unit), production_lines(name)')
+        .order('created_at', { ascending: false })
+        .limit(100);
+      if (status) query = query.eq('status', status);
+      const { data } = await query;
+
+      const statusText = { pending: '待确认', approved: '已确认', rejected: '已驳回' };
+      const statusClass = { pending: 'badge-warning', approved: 'badge-success', rejected: 'badge-danger' };
+
+      document.getElementById('adjustmentsList').innerHTML = (data || []).length === 0
+        ? '<p style="color:#999;">暂无调整申请</p>'
+        : `<div class="table-wrapper"><table class="data-table"><thead><tr><th>申请时间</th><th>产线</th><th>用品</th><th>规格</th><th>调整数量</th><th>调整原因</th><th>申请人</th><th>状态</th><th>操作</th></tr></thead><tbody>${(data || []).map(r => `<tr>
+            <td>${Common.formatDateTime(r.created_at)}</td>
+            <td>${Common.escapeHtml(r.production_lines?.name || '')}</td>
+            <td>${Common.escapeHtml(r.supplies?.name || '')}</td>
+            <td>${Common.escapeHtml(r.supplies?.spec || '')}</td>
+            <td style="color:${r.change_qty > 0 ? '#2e7d32' : '#c62828'};font-weight:600;">${r.change_qty > 0 ? '+' : ''}${r.change_qty} ${Common.escapeHtml(r.supplies?.unit || '')}</td>
+            <td>${Common.escapeHtml(r.reason || '')}</td>
+            <td>${Common.escapeHtml(r.applicant_name || '')}</td>
+            <td><span class="badge ${statusClass[r.status] || ''}">${statusText[r.status] || r.status}</span></td>
+            <td>${r.status === 'pending' ? `<button class="btn btn-success btn-sm" onclick="approveAdjustment('${r.id}')">确认</button> <button class="btn btn-danger btn-sm" onclick="rejectAdjustment('${r.id}')">驳回</button>` : (r.status === 'rejected' ? Common.escapeHtml(r.reject_reason || '') : Common.formatDateTime(r.approved_at))}</td>
+          </tr>`).join('')}</tbody></table></div>`;
+    }
+
+    // 确认调整（真正改库存）
+    async function approveAdjustment(id) {
+      if (!Common.confirm('确认通过该库存调整？确认后将立即调整库存。')) return;
+      Common.showLoading('确认中...');
+      try {
+        const { data: adj } = await supabase.from('stock_adjustments').select('*').eq('id', id).single();
+        if (!adj || adj.status !== 'pending') { Common.toast('该申请已处理', 'error'); Common.hideLoading(); return; }
+
+        // 查询当前库存
+        const { data: stock } = await supabase.from('supply_stock').select('id, quantity').eq('line_id', adj.line_id).eq('supply_id', adj.supply_id).maybeSingle();
+        if (!stock) { Common.toast('该产线无此用品库存', 'error'); Common.hideLoading(); return; }
+        const newBalance = stock.quantity + adj.change_qty;
+        if (newBalance < 0) { Common.toast('调整后库存不能为负', 'error'); Common.hideLoading(); return; }
+
+        // 更新库存
+        await supabase.from('supply_stock').update({ quantity: newBalance }).eq('id', stock.id);
+        // 写入流水
+        await supabase.from('stock_records').insert({
+          line_id: adj.line_id, supply_id: adj.supply_id,
+          change_type: 'adjust', change_qty: adj.change_qty, balance: newBalance,
+          ref_type: 'adjust', ref_id: adj.id,
+          operator_id: user.id, operator_name: user.name
+        });
+        // 更新申请状态
+        await supabase.from('stock_adjustments').update({
+          status: 'approved', approver_id: user.id, approver_name: user.name, approved_at: new Date().toISOString()
+        }).eq('id', id);
+        await Auth.logAction(user, 'approve_stock_adjust', 'stock_adjustments', id, adj.reason + `（${adj.change_qty}）`);
+        Common.toast('已确认，库存已调整', 'success');
+        loadAdjustments();
+      } catch (e) {
+        Common.toast('确认失败：' + e.message, 'error');
+      }
+      Common.hideLoading();
+    }
+
+    // 驳回调整
+    async function rejectAdjustment(id) {
+      const reason = prompt('请输入驳回原因：');
+      if (!reason) return;
+      Common.showLoading('驳回中...');
+      try {
+        await supabase.from('stock_adjustments').update({
+          status: 'rejected', approver_id: user.id, approver_name: user.name, reject_reason: reason
+        }).eq('id', id);
+        await Auth.logAction(user, 'reject_stock_adjust', 'stock_adjustments', id, reason);
+        Common.toast('已驳回', 'success');
+        loadAdjustments();
+      } catch (e) {
+        Common.toast('驳回失败：' + e.message, 'error');
+      }
+      Common.hideLoading();
+    }
+
+    // ===== 批量导入库存 =====
+    // 下载库存导入模板（动态列出所有产线×所有用品）
+    async function downloadStockTemplate() {
+      const [{ data: lines }, { data: supplies }] = await Promise.all([
+        supabase.from('production_lines').select('id, name').order('name'),
+        supabase.from('supplies').select('code, name, spec').eq('status', 'active').order('code')
+      ]);
+      let csv = '\ufeff产线名称,用品编号,劳动防护用品名称,规格型号,库存数量\n';
+      (lines || []).forEach(line => {
+        (supplies || []).forEach(s => {
+          csv += `${line.name},${s.code || ''},${s.name || ''},${s.spec || ''},\n`;
+        });
+      });
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = '库存导入模板.csv';
+      link.click();
+    }
+
+    async function importStock(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      event.target.value = '';
+
+      // 读取为ArrayBuffer，自动识别UTF-8/GBK编码
+      const buffer = await file.arrayBuffer();
+      let text;
+      try {
+        text = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+      } catch (e) {
+        text = new TextDecoder('gbk').decode(buffer);
+      }
+      if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+
+      const lines = text.split(/\r?\n/).filter(l => l.trim());
+      if (lines.length < 2) { Common.toast('文件无数据', 'error'); return; }
+
+      // 解析表头
+      const header = lines[0].split(',').map(h => h.trim().replace(/^\uFEFF/, ''));
+      const lineIdx = header.findIndex(h => h.includes('产线'));
+      const codeIdx = header.findIndex(h => h.includes('编号') || h.includes('code'));
+      const qtyIdx = header.findIndex(h => h.includes('库存') || h.includes('数量') || h.includes('qty'));
+      if (lineIdx < 0 || codeIdx < 0 || qtyIdx < 0) { Common.toast('表头格式错误，需包含：产线名称、用品编号、库存数量', 'error'); return; }
+
+      // 加载所有产线和用品用于匹配
+      const [{ data: allLines }, { data: allSupplies }] = await Promise.all([
+        supabase.from('production_lines').select('id, name'),
+        supabase.from('supplies').select('id, code, name')
+      ]);
+      const lineMap = {}; (allLines || []).forEach(l => { lineMap[l.name.trim()] = l.id; });
+      const supplyMap = {}; (allSupplies || []).forEach(s => { supplyMap[(s.code || '').trim()] = s; });
+
+      // 解析数据行
+      const records = [];
+      const errors = [];
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(',').map(c => c.trim());
+        const lineName = cols[lineIdx] || '';
+        const code = cols[codeIdx] || '';
+        const qtyStr = cols[qtyIdx] || '';
+        // 库存数量为空的行跳过（不更新为0）
+        if (qtyStr === '') continue;
+        const qty = parseInt(qtyStr);
+        if (isNaN(qty)) { errors.push(`第${i+1}行：库存数量"${qtyStr}"不是有效数字`); continue; }
+        const lineId = lineMap[lineName];
+        const supply = supplyMap[code];
+        if (!lineId) { errors.push(`第${i+1}行：产线"${lineName}"不存在`); continue; }
+        if (!supply) { errors.push(`第${i+1}行：用品编号"${code}"不存在`); continue; }
+        if (qty < 0) { errors.push(`第${i+1}行：库存数量不能为负`); continue; }
+        records.push({ line_id: lineId, supply_id: supply.id, line_name: lineName, supply_name: supply.name, qty });
+      }
+
+      if (records.length === 0) { Common.toast('没有可导入的数据：' + errors.join('；'), 'error'); return; }
+      if (!Common.confirm(`确认导入 ${records.length} 条库存？\n将覆盖对应产线的现有库存。\n${errors.length > 0 ? '另有 ' + errors.length + ' 条匹配失败将跳过。' : ''}`)) return;
+
+      Common.showLoading('导入中...');
+      let success = 0, fail = 0;
+      try {
+        for (const rec of records) {
+          // 查询现有库存
+          const { data: stock } = await supabase.from('supply_stock').select('id, quantity').eq('line_id', rec.line_id).eq('supply_id', rec.supply_id).maybeSingle();
+          if (stock) {
+            // 更新库存
+            await supabase.from('supply_stock').update({ quantity: rec.qty }).eq('id', stock.id);
+          } else {
+            // 插入新库存记录
+            await supabase.from('supply_stock').insert({ line_id: rec.line_id, supply_id: rec.supply_id, quantity: rec.qty });
+          }
+          // 写入流水
+          await supabase.from('stock_records').insert({
+            line_id: rec.line_id, supply_id: rec.supply_id,
+            change_type: 'adjust', change_qty: rec.qty - (stock?.quantity || 0), balance: rec.qty,
+            ref_type: 'import', ref_id: null,
+            operator_id: user.id, operator_name: user.name
+          });
+          success++;
+        }
+        await Auth.logAction(user, 'import_stock', 'supply_stock', null, `批量导入${success}条库存`);
+        Common.toast(`导入完成：成功${success}条${errors.length > 0 ? '，跳过' + errors.length + '条' : ''}`, 'success');
+        if (errors.length > 0) alert('以下记录匹配失败已跳过：\n' + errors.join('\n'));
+        loadAllStock();
+      } catch (e) {
+        Common.toast('导入失败：' + e.message, 'error');
+      }
+      Common.hideLoading();
+    }
+  </script>
+</body>
+</html>

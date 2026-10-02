@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>劳动防护用品领用登记</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="topbar">
+    <h1 id="pageTitle">劳动防护用品领用登记</h1>
+  </div>
+
+  <div class="container">
+    <!-- 步骤1：填写信息 -->
+    <div id="step1" class="card">
+      <h3>领用信息</h3>
+      <div class="form-group">
+        <label>产线</label>
+        <input type="text" id="lineName" readonly style="background:#f5f5f5;">
+      </div>
+      <div class="form-group">
+        <label>姓名 <span style="color:#f44336;">*</span></label>
+        <input type="text" id="employeeName" placeholder="请输入您的姓名" maxlength="20">
+      </div>
+      <div class="form-group">
+        <label>选择班组长 <span style="color:#f44336;">*</span></label>
+        <select id="teamLeaderSelect">
+          <option value="">请选择班组长</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>用工性质 <span style="color:#f44336;">*</span></label>
+        <div class="radio-group">
+          <label><input type="radio" name="workerType" value="formal"> 正式工</label>
+          <label><input type="radio" name="workerType" value="labor"> 劳务工</label>
+        </div>
+      </div>
+      <button class="btn btn-primary btn-block" onclick="goStep2()">下一步：选择用品</button>
+    </div>
+
+    <!-- 步骤2：选择用品 -->
+    <div id="step2" class="card" style="display:none;">
+      <h3>选择领用用品</h3>
+      <p style="font-size:12px;color:#999;margin-bottom:10px;">勾选需要领用的用品，可多选</p>
+      <div class="supply-list" id="supplyList"></div>
+      <div id="selectedItems" style="margin-top:12px;"></div>
+      <div class="btn-group" style="margin-top:12px;">
+        <button class="btn btn-default" onclick="goStep1()">上一步</button>
+        <button class="btn btn-primary" onclick="goStep3()">下一步：签名</button>
+      </div>
+    </div>
+
+    <!-- 步骤3：签名 -->
+    <div id="step3" class="card" style="display:none;">
+      <h3>手写签名</h3>
+      <div id="summaryArea" style="margin-bottom:12px;"></div>
+      <canvas id="signatureCanvas" class="signature-canvas"></canvas>
+      <p class="signature-label">请在上方区域手写签名</p>
+      <div class="btn-group" style="margin-top:12px;">
+        <button class="btn btn-default" onclick="goStep2()">上一步</button>
+        <button class="btn btn-default" onclick="clearSignature()">清除重签</button>
+        <button class="btn btn-success" onclick="submitRequisition()">提交领用</button>
+      </div>
+    </div>
+
+    <!-- 提交成功 -->
+    <div id="stepSuccess" class="card" style="display:none;text-align:center;">
+      <div style="font-size:48px;margin-bottom:12px;">✅</div>
+      <h3 style="border:none;color:#4caf50;">提交成功</h3>
+      <p style="margin:12px 0;">领用单号：<strong id="reqNoDisplay"></strong></p>
+      <p style="font-size:13px;color:#666;margin-bottom:8px;">已提交给 <strong id="tlDisplay"></strong></p>
+      <p style="font-size:12px;color:#999;">请找班组长确认后领取实物</p>
+      <button class="btn btn-primary" style="margin-top:16px;" onclick="resetForm()">继续领用</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js"></script>
+  <script src="js/supabase-init.js"></script>
+  <script src="js/common.js"></script>
+  <script src="js/signature.js"></script>
+  <script>
+    let currentLine = null;
+    let teamLeaders = [];
+    let supplies = [];
+    let selectedSupplies = []; // {supply_id, name, spec, unit, qty, stock}
+    let sigPad = null;
+
+    // 初始化
+    async function init() {
+      // 从URL获取产线token
+      const urlParams = new URLSearchParams(window.location.search);
+      const lineToken = urlParams.get('line') || 'line-a-token';
+
+      // 获取产线信息
+      const { data: lineData, error: lineError } = await supabase
+        .from('production_lines')
+        .select('*')
+        .eq('qr_token', lineToken)
+        .eq('status', 'active')
+        .single();
+
+      if (lineError || !lineData) {
+        alert('无效的产线二维码，请联系管理员');
+        return;
+      }
+      currentLine = lineData;
+      document.getElementById('lineName').value = lineData.name;
+      document.getElementById('pageTitle').textContent = lineData.name + ' - 领用登记';
+
+      // 获取该产线的班组长（带班组名）
+      const { data: tlData } = await supabase
+        .from('users')
+        .select('id, name, team_id, teams(name)')
+        .eq('role', 'team_leader')
+        .eq('line_id', lineData.id)
+        .eq('status', 'active');
+
+      teamLeaders = tlData || [];
+      const select = document.getElementById('teamLeaderSelect');
+      teamLeaders.forEach(tl => {
+        const opt = document.createElement('option');
+        opt.value = tl.id;
+        opt.textContent = tl.name + '（' + (tl.teams?.name || '') + '）';
+        select.appendChild(opt);
+      });
+
+      // 获取该产线有库存的用品
+      await loadSupplies();
+      // 签名板延迟到进入签名页时初始化（隐藏状态下Canvas尺寸为0）
+    }
+
+    async function loadSupplies() {
+      const { data } = await supabase
+        .from('supply_stock')
+        .select('supply_id, quantity, supplies(id, name, spec, unit, status, safety_stock)')
+        .eq('line_id', currentLine.id)
+        .gt('quantity', 0);
+
+      // 只显示有库存的用品（含已停用但有剩余库存的）
+      supplies = (data || []).filter(s => s.supplies);
+      renderSupplyList();
+    }
+
+    function renderSupplyList() {
+      const list = document.getElementById('supplyList');
+      if (supplies.length === 0) {
+        list.innerHTML = '<div class="empty-state"><div class="icon">📦</div><p>当前产线暂无可用库存</p></div>';
+        return;
+      }
+      list.innerHTML = supplies.map(s => {
+        const isSelected = selectedSupplies.find(x => x.supply_id === s.supply_id);
+        const lowStock = s.quantity <= (s.supplies.safety_stock || 0);
+        return `
+          <div class="supply-item ${isSelected ? 'selected' : ''}" onclick="toggleSupply('${s.supply_id}')">
+            <div class="supply-name">${Common.escapeHtml(s.supplies.name)}</div>
+            <div class="supply-spec">${Common.escapeHtml(s.supplies.spec || '')}</div>
+            <div class="stock ${lowStock ? 'low' : ''}">库存: ${s.quantity}</div>
+          </div>`;
+      }).join('');
+    }
+
+    function toggleSupply(supplyId) {
+      const s = supplies.find(x => x.supply_id === supplyId);
+      if (!s) return;
+      const idx = selectedSupplies.findIndex(x => x.supply_id === supplyId);
+      if (idx >= 0) {
+        selectedSupplies.splice(idx, 1);
+      } else {
+        selectedSupplies.push({
+          supply_id: s.supply_id,
+          name: s.supplies.name,
+          spec: s.supplies.spec,
+          unit: s.supplies.unit,
+          qty: 1,
+          stock: s.quantity
+        });
+      }
+      renderSupplyList();
+      renderSelectedItems();
+    }
+
+    function renderSelectedItems() {
+      const area = document.getElementById('selectedItems');
+      if (selectedSupplies.length === 0) {
+        area.innerHTML = '';
+        return;
+      }
+      area.innerHTML = '<div style="margin-top:12px;padding:10px;background:#f5f7fa;border-radius:6px;">' +
+        '<div style="font-weight:600;margin-bottom:8px;font-size:13px;">已选用品（填写数量）：</div>' +
+        selectedSupplies.map((s, i) => `
+          <div class="item-row">
+            <div style="flex:1;min-width:100px;">
+              <div style="font-size:13px;font-weight:500;">${Common.escapeHtml(s.name)}</div>
+              <div style="font-size:11px;color:#999;">${Common.escapeHtml(s.spec||'')}</div>
+            </div>
+            <input type="number" min="1" max="${s.stock}" value="${s.qty}" onchange="updateQty(${i}, this.value)">
+            <span class="unit">${Common.escapeHtml(s.unit||'')}</span>
+            <button class="btn btn-danger btn-sm" onclick="removeSupply(${i})">删</button>
+          </div>`).join('') +
+        '</div>';
+    }
+
+    function updateQty(idx, val) {
+      const v = parseInt(val) || 1;
+      selectedSupplies[idx].qty = Math.max(1, Math.min(v, selectedSupplies[idx].stock));
+    }
+
+    function removeSupply(idx) {
+      selectedSupplies.splice(idx, 1);
+      renderSupplyList();
+      renderSelectedItems();
+    }
+
+    function clearSignature() {
+      sigPad.clear();
+    }
+
+    function goStep1() { showStep(1); }
+    function goStep2() {
+      const name = document.getElementById('employeeName').value.trim();
+      const tl = document.getElementById('teamLeaderSelect').value;
+      const wt = document.querySelector('input[name="workerType"]:checked');
+      if (!name) { Common.toast('请输入姓名', 'error'); return; }
+      if (!tl) { Common.toast('请选择班组长', 'error'); return; }
+      if (!wt) { Common.toast('请选择用工性质', 'error'); return; }
+      showStep(2);
+    }
+    function goStep3() {
+      if (selectedSupplies.length === 0) { Common.toast('请至少选择一种用品', 'error'); return; }
+      // 渲染摘要
+      const name = document.getElementById('employeeName').value.trim();
+      const tlName = document.getElementById('teamLeaderSelect').selectedOptions[0].text;
+      const wt = document.querySelector('input[name="workerType"]:checked').value === 'formal' ? '正式工' : '劳务工';
+      document.getElementById('summaryArea').innerHTML = `
+        <div style="background:#f5f7fa;padding:10px;border-radius:6px;font-size:13px;">
+          <div><strong>姓名：</strong>${Common.escapeHtml(name)}（${wt}）</div>
+          <div><strong>班组长：</strong>${Common.escapeHtml(tlName)}</div>
+          <div style="margin-top:6px;"><strong>领用明细：</strong></div>
+          ${selectedSupplies.map(s => `<div style="padding-left:12px;">· ${Common.escapeHtml(s.name)} ${Common.escapeHtml(s.spec||'')} × ${s.qty} ${Common.escapeHtml(s.unit||'')}</div>`).join('')}
+        </div>`;
+      showStep(3);
+      // 进入签名页后再初始化签名板（此时Canvas已显示，尺寸正确）
+      setTimeout(() => { if (!sigPad) sigPad = new SignaturePad('signatureCanvas'); }, 50);
+    }
+
+    function showStep(n) {
+      ['step1','step2','step3','stepSuccess'].forEach(id => {
+        document.getElementById(id).style.display = 'none';
+      });
+      document.getElementById('step' + n).style.display = 'block';
+      window.scrollTo(0, 0);
+    }
+
+    async function submitRequisition() {
+      if (sigPad.isEmpty()) { Common.toast('请先手写签名', 'error'); return; }
+
+      Common.showLoading('提交中...');
+      try {
+        const name = document.getElementById('employeeName').value.trim();
+        const tlId = document.getElementById('teamLeaderSelect').value;
+        const tlName = document.getElementById('teamLeaderSelect').selectedOptions[0].text;
+        const wt = document.querySelector('input[name="workerType"]:checked').value;
+        const reqNo = Common.genNo('REQ');
+        const signImage = sigPad.toDataURL();
+
+        // 插入领用单
+        const { data: reqData, error: reqError } = await supabase
+          .from('requisitions')
+          .insert({
+            req_no: reqNo,
+            line_id: currentLine.id,
+            employee_name: name,
+            worker_type: wt,
+            team_leader_id: tlId,
+            sign_image: signImage,
+            status: 'pending'
+          })
+          .select('id')
+          .single();
+
+        if (reqError) throw reqError;
+
+        // 插入明细
+        const items = selectedSupplies.map(s => ({
+          req_id: reqData.id,
+          supply_id: s.supply_id,
+          name: s.name,
+          spec: s.spec,
+          unit: s.unit,
+          qty: s.qty
+        }));
+        const { error: itemError } = await supabase.from('requisition_items').insert(items);
+        if (itemError) throw itemError;
+
+        // 记录操作日志
+        await supabase.from('operation_logs').insert({
+          operator_id: null,
+          operator_name: name,
+          role: 'employee',
+          action: 'submit_requisition',
+          ref_type: 'requisition',
+          ref_id: reqData.id,
+          detail: '员工提交领用单，指定班组长：' + tlName
+        });
+
+        // 显示成功
+        document.getElementById('reqNoDisplay').textContent = reqNo;
+        document.getElementById('tlDisplay').textContent = tlName;
+        showStep('Success');
+
+      } catch (e) {
+        console.error(e);
+        Common.toast('提交失败：' + (e.message || '未知错误'), 'error');
+      }
+      Common.hideLoading();
+    }
+
+    function resetForm() {
+      document.getElementById('employeeName').value = '';
+      document.getElementById('teamLeaderSelect').value = '';
+      document.querySelectorAll('input[name="workerType"]').forEach(r => r.checked = false);
+      selectedSupplies = [];
+      sigPad.clear();
+      renderSupplyList();
+      renderSelectedItems();
+      showStep(1);
+    }
+
+    // 启动
+    init();
+  </script>
+</body>
+</html>

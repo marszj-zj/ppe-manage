@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>班组长端 - 劳动防护用品管理</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="topbar">
+    <h1>班组长工作台</h1>
+    <div class="user-info">
+      <span id="userName"></span>
+      <button onclick="Auth.showChangePasswordModal()" style="margin-right:8px;font-size:12px;">改密</button>
+      <button onclick="Auth.logout()">退出</button>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="active" onclick="switchTab('pending', this)">待确认 <span id="pendingCount" class="badge badge-danger" style="margin-left:4px;">0</span></button>
+    <button onclick="switchTab('history', this)">历史记录</button>
+    <button onclick="switchTab('report', this)">月报签名</button>
+  </div>
+
+  <div class="container">
+    <!-- 待确认 -->
+    <div id="tab-pending" class="tab-content active">
+      <div id="pendingList"></div>
+    </div>
+
+    <!-- 历史记录 -->
+    <div id="tab-history" class="tab-content">
+      <div class="card">
+        <div class="form-row">
+          <div class="form-group">
+            <label>状态</label>
+            <select id="historyStatus" onchange="loadHistory()">
+              <option value="">全部</option>
+              <option value="approved">已确认</option>
+              <option value="rejected">已驳回</option>
+              <option value="pending">待确认</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div id="historyList"></div>
+    </div>
+
+    <!-- 月报签名 -->
+    <div id="tab-report" class="tab-content">
+      <div class="card">
+        <h3>月度领用报表</h3>
+        <div class="form-group">
+          <label>选择月份</label>
+          <input type="month" id="reportMonth" value="">
+        </div>
+        <button class="btn btn-primary" onclick="loadReport()">生成/查看报表</button>
+      </div>
+      <div id="reportArea"></div>
+    </div>
+  </div>
+
+  <!-- 领用单详情弹窗 -->
+  <div id="detailModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:200;align-items:center;justify-content:center;padding:16px;">
+    <div class="card" style="max-width:500px;width:100%;max-height:90vh;overflow-y:auto;">
+      <h3>领用单详情</h3>
+      <div id="detailContent"></div>
+      <div class="btn-group" style="margin-top:16px;">
+        <button class="btn btn-default" onclick="closeDetail()">关闭</button>
+        <button class="btn btn-danger" id="rejectBtn" onclick="showRejectInput()">驳回</button>
+        <button class="btn btn-success" id="approveBtn" onclick="approveReq()">确认通过</button>
+        <button class="btn btn-warning" id="revokeBtn" style="display:none;" onclick="revokeReq()">撤回（当天）</button>
+      </div>
+      <div id="rejectArea" style="display:none;margin-top:12px;">
+        <div class="form-group">
+          <label>驳回原因</label>
+          <textarea id="rejectReason" rows="2" placeholder="请输入驳回原因"></textarea>
+        </div>
+        <button class="btn btn-danger" onclick="confirmReject()">确认驳回</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js"></script>
+  <script src="js/supabase-init.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/common.js"></script>
+  <script>
+    const user = Auth.requireLogin(['team_leader']);
+    let currentReq = null;
+    let currentReport = null;
+
+    document.getElementById('userName').textContent = user.name;
+    document.getElementById('reportMonth').value = Common.currentMonth();
+
+    function switchTab(tab, btn) {
+      document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
+      document.getElementById('tab-' + tab).classList.add('active');
+      btn.classList.add('active');
+      if (tab === 'pending') loadPending();
+      if (tab === 'history') loadHistory();
+    }
+
+    // 加载待确认
+    async function loadPending() {
+      const { data } = await supabase
+        .from('requisitions')
+        .select('*, requisition_items(*)')
+        .eq('team_leader_id', user.id)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false });
+
+      const list = document.getElementById('pendingList');
+      document.getElementById('pendingCount').textContent = (data || []).length;
+
+      if (!data || data.length === 0) {
+        list.innerHTML = '<div class="card empty-state"><div class="icon">📋</div><p>暂无待确认领用单</p></div>';
+        return;
+      }
+
+      list.innerHTML = data.map(req => `
+        <div class="card" style="cursor:pointer;" onclick="openDetail('${req.id}')">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <strong>${Common.escapeHtml(req.employee_name)}</strong>
+            <span class="badge badge-warning">待确认</span>
+          </div>
+          <div style="font-size:12px;color:#999;margin-top:4px;">
+            ${Common.workerTypeText(req.worker_type)} · ${Common.formatDateTime(req.created_at)}
+          </div>
+          <div style="margin-top:8px;font-size:13px;">
+            ${req.requisition_items.map(item => `${Common.escapeHtml(item.name)} × ${item.qty}${Common.escapeHtml(item.unit||'')}`).join('、')}
+          </div>
+          <div class="btn-group" style="margin-top:12px;" onclick="event.stopPropagation();">
+            <button class="btn btn-success btn-block" style="flex:1;padding:12px;font-size:15px;" onclick="quickApprove('${req.id}')">✓ 确认通过</button>
+            <button class="btn btn-danger btn-block" style="flex:1;padding:12px;font-size:15px;" onclick="quickReject('${req.id}')">✗ 驳回</button>
+          </div>
+        </div>`).join('');
+    }
+
+    // 加载历史
+    async function loadHistory() {
+      const status = document.getElementById('historyStatus').value;
+      let query = supabase
+        .from('requisitions')
+        .select('*, requisition_items(*)')
+        .eq('team_leader_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (status) query = query.eq('status', status);
+      const { data } = await query;
+
+      const list = document.getElementById('historyList');
+      if (!data || data.length === 0) {
+        list.innerHTML = '<div class="card empty-state"><p>暂无记录</p></div>';
+        return;
+      }
+
+      list.innerHTML = data.map(req => {
+        const statusBadge = req.status === 'approved' ? 'badge-success' : req.status === 'rejected' ? 'badge-danger' : 'badge-warning';
+        return `
+        <div class="card" onclick="openDetail('${req.id}')" style="cursor:pointer;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <strong>${Common.escapeHtml(req.employee_name)}</strong>
+            <span class="badge ${statusBadge}">${Common.statusText(req.status)}</span>
+          </div>
+          <div style="font-size:12px;color:#999;margin-top:4px;">
+            ${Common.workerTypeText(req.worker_type)} · ${Common.formatDateTime(req.created_at)}
+            ${req.reject_reason ? ` · 驳回：${Common.escapeHtml(req.reject_reason)}` : ''}
+          </div>
+          <div style="margin-top:8px;font-size:13px;">
+            ${req.requisition_items.map(item => `${Common.escapeHtml(item.name)} × ${item.qty}${Common.escapeHtml(item.unit||'')}`).join('、')}
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    // 打开详情
+    async function openDetail(reqId) {
+      const { data } = await supabase
+        .from('requisitions')
+        .select('*, requisition_items(*)')
+        .eq('id', reqId)
+        .single();
+      currentReq = data;
+
+      const isToday = new Date(data.created_at).toDateString() === new Date().toDateString();
+      const canApprove = data.status === 'pending';
+      const canRevoke = data.status === 'approved' && isToday;
+
+      document.getElementById('approveBtn').style.display = canApprove ? '' : 'none';
+      document.getElementById('rejectBtn').style.display = canApprove ? '' : 'none';
+      document.getElementById('revokeBtn').style.display = canRevoke ? '' : 'none';
+      document.getElementById('rejectArea').style.display = 'none';
+
+      const statusBadge = data.status === 'approved' ? 'badge-success' : data.status === 'rejected' ? 'badge-danger' : 'badge-warning';
+      document.getElementById('detailContent').innerHTML = `
+        <div style="margin-bottom:12px;">
+          <div><strong>单号：</strong>${data.req_no}</div>
+          <div><strong>姓名：</strong>${Common.escapeHtml(data.employee_name)}（${Common.workerTypeText(data.worker_type)}）</div>
+          <div><strong>状态：</strong><span class="badge ${statusBadge}">${Common.statusText(data.status)}</span></div>
+          <div><strong>提交时间：</strong>${Common.formatDateTime(data.created_at)}</div>
+          ${data.sign_image ? `<div style="margin-top:8px;"><strong>员工签名：</strong><br><img src="${data.sign_image}" style="max-width:200px;border:1px solid #eee;border-radius:4px;"></div>` : ''}
+        </div>
+        <table class="data-table">
+          <thead><tr><th>用品</th><th>规格</th><th>数量</th><th>单位</th></tr></thead>
+          <tbody>
+            ${data.requisition_items.map(item => `<tr><td>${Common.escapeHtml(item.name)}</td><td>${Common.escapeHtml(item.spec||'')}</td><td>${item.qty}</td><td>${Common.escapeHtml(item.unit||'')}</td></tr>`).join('')}
+          </tbody>
+        </table>`;
+
+      document.getElementById('detailModal').style.display = 'flex';
+    }
+
+    function closeDetail() {
+      document.getElementById('detailModal').style.display = 'none';
+      currentReq = null;
+    }
+
+    // 手机端快速确认（不打开详情）
+    async function quickApprove(reqId) {
+      if (!Common.confirm('确认通过该领用单？确认后将自动扣减库存。')) return;
+      const { data } = await supabase.from('requisitions').select('*, requisition_items(*)').eq('id', reqId).single();
+      currentReq = data;
+      await approveReq();
+    }
+
+    // 手机端快速驳回（打开详情并定位到驳回输入）
+    async function quickReject(reqId) {
+      await openDetail(reqId);
+      showRejectInput();
+    }
+
+    function showRejectInput() {
+      document.getElementById('rejectArea').style.display = 'block';
+    }
+
+    // 确认通过
+    async function approveReq() {
+      if (!currentReq) return;
+      if (!Common.confirm('确认通过该领用单？确认后将自动扣减库存。')) return;
+
+      Common.showLoading('处理中...');
+      try {
+        // 检查库存
+        for (const item of currentReq.requisition_items) {
+          const { data: stock } = await supabase
+            .from('supply_stock')
+            .select('quantity')
+            .eq('supply_id', item.supply_id)
+            .eq('line_id', currentReq.line_id)
+            .single();
+          if (!stock || stock.quantity < item.qty) {
+            throw new Error(`${item.name} 库存不足（当前${stock ? stock.quantity : 0}，需要${item.qty}）`);
+          }
+        }
+
+        // 扣减库存 + 写流水
+        for (const item of currentReq.requisition_items) {
+          const { data: stock } = await supabase
+            .from('supply_stock')
+            .select('quantity, id')
+            .eq('supply_id', item.supply_id)
+            .eq('line_id', currentReq.line_id)
+            .single();
+          const newBalance = stock.quantity - item.qty;
+          await supabase.from('supply_stock').update({ quantity: newBalance }).eq('id', stock.id);
+          await supabase.from('stock_records').insert({
+            line_id: currentReq.line_id,
+            supply_id: item.supply_id,
+            change_type: 'out',
+            change_qty: -item.qty,
+            balance: newBalance,
+            ref_type: 'requisition',
+            ref_id: currentReq.id,
+            operator_id: user.id,
+            operator_name: user.name
+          });
+        }
+
+        // 更新领用单状态
+        await supabase.from('requisitions').update({
+          status: 'approved',
+          approver_id: user.id,
+          approved_at: new Date().toISOString()
+        }).eq('id', currentReq.id);
+
+        await Auth.logAction(user, 'approve', 'requisition', currentReq.id, '确认领用单');
+        Common.toast('确认成功，库存已扣减', 'success');
+        closeDetail();
+        loadPending();
+      } catch (e) {
+        Common.toast('操作失败：' + e.message, 'error');
+      }
+      Common.hideLoading();
+    }
+
+    // 驳回
+    async function confirmReject() {
+      const reason = document.getElementById('rejectReason').value.trim();
+      if (!reason) { Common.toast('请输入驳回原因', 'error'); return; }
+      if (!currentReq) return;
+
+      Common.showLoading('处理中...');
+      await supabase.from('requisitions').update({
+        status: 'rejected',
+        reject_reason: reason
+      }).eq('id', currentReq.id);
+      await Auth.logAction(user, 'reject', 'requisition', currentReq.id, '驳回：' + reason);
+      Common.hideLoading();
+      Common.toast('已驳回', 'success');
+      closeDetail();
+      loadPending();
+    }
+
+    // 撤回（当天误操作）
+    async function revokeReq() {
+      if (!currentReq) return;
+      if (!Common.confirm('确认撤回该确认操作？库存将恢复。')) return;
+
+      Common.showLoading('处理中...');
+      try {
+        // 恢复库存
+        for (const item of currentReq.requisition_items) {
+          const { data: stock } = await supabase
+            .from('supply_stock')
+            .select('quantity, id')
+            .eq('supply_id', item.supply_id)
+            .eq('line_id', currentReq.line_id)
+            .single();
+          const newBalance = stock.quantity + item.qty;
+          await supabase.from('supply_stock').update({ quantity: newBalance }).eq('id', stock.id);
+          await supabase.from('stock_records').insert({
+            line_id: currentReq.line_id,
+            supply_id: item.supply_id,
+            change_type: 'adjust',
+            change_qty: item.qty,
+            balance: newBalance,
+            ref_type: 'requisition',
+            ref_id: currentReq.id,
+            operator_id: user.id,
+            operator_name: user.name
+          });
+        }
+        await supabase.from('requisitions').update({
+          status: 'pending',
+          approver_id: null,
+          approved_at: null
+        }).eq('id', currentReq.id);
+        await Auth.logAction(user, 'revoke', 'requisition', currentReq.id, '撤回当天误操作');
+        Common.toast('已撤回，库存已恢复', 'success');
+        closeDetail();
+        loadPending();
+      } catch (e) {
+        Common.toast('撤回失败：' + e.message, 'error');
+      }
+      Common.hideLoading();
+    }
+
+    // ===== 月报签名 =====
+    async function loadReport() {
+      const month = document.getElementById('reportMonth').value;
+      if (!month) { Common.toast('请选择月份', 'error'); return; }
+
+      Common.showLoading('生成报表中...');
+
+      // 先查是否已有月报记录
+      const { data: existingReport } = await supabase
+        .from('monthly_reports')
+        .select('*')
+        .eq('line_id', user.line_id)
+        .eq('team_id', user.team_id)
+        .eq('month', month)
+        .maybeSingle();
+
+      // 获取该班组当月已确认的领用（含明细）
+      const { data: reqs } = await supabase
+        .from('requisitions')
+        .select('*, requisition_items(*)')
+        .eq('team_leader_id', user.id)
+        .eq('status', 'approved')
+        .gte('approved_at', month + '-01T00:00:00')
+        .lte('approved_at', month + '-31T23:59:59')
+        .order('approved_at');
+
+      // 按用工性质分明细（每条用品一行，带领用人和日期）
+      const formalDetails = [];
+      const laborDetails = [];
+      (reqs || []).forEach(req => {
+        const arr = req.worker_type === 'formal' ? formalDetails : laborDetails;
+        req.requisition_items.forEach(item => {
+          arr.push({
+            name: item.name,
+            spec: item.spec,
+            unit: item.unit,
+            qty: item.qty,
+            employee_name: req.employee_name,
+            approved_at: req.approved_at,
+            note: ''
+          });
+        });
+      });
+
+      currentReport = { month, formalDetails, laborDetails, existing: existingReport };
+      renderReport();
+      Common.hideLoading();
+    }
+
+    function renderReport() {
+      if (!currentReport) return;
+      const { month, formalDetails, laborDetails, existing } = currentReport;
+      const area = document.getElementById('reportArea');
+      const isSigned = existing && (existing.status === 'team_signed' || existing.status === 'done');
+      const isDone = existing && existing.status === 'done';
+      const monthNum = month.split('-')[1]?.replace(/^0/, '') || month;
+
+      const renderDetailTable = (items, title, logoText) => {
+        const logoHtml = logoText === 'KAPABOL'
+          ? `<img src="images/logo.png" style="max-height:32px;">`
+          : `<span style="font-size:14px;font-weight:bold;color:#1a73e8;letter-spacing:1px;">${logoText}</span>`;
+        return `
+        <div style="margin-bottom:24px;">
+          <div style="display:flex;align-items:center;margin-bottom:8px;">
+            <div style="flex:0 0 120px;">${logoHtml}</div>
+            <div style="flex:1;text-align:center;">
+              <h3 style="margin:0;font-size:18px;letter-spacing:1px;">&nbsp;&nbsp;${monthNum}月劳动防护用品发放记录表</h3>
+            </div>
+            <div style="flex:0 0 120px;"></div>
+          </div>
+          <table style="width:100%;border-collapse:collapse;margin-bottom:0;" border="1">
+            <tr>
+              <td style="padding:6px;width:50%;">部门/产线：&nbsp;&nbsp;</td>
+              <td style="padding:6px;width:50%;">发放人：&nbsp;&nbsp;${Common.escapeHtml(user.name)}</td>
+            </tr>
+          </table>
+          <p style="font-size:13px;font-weight:600;margin:8px 0 4px;">${title}</p>
+          ${items.length === 0 ? '<p style="color:#999;font-size:13px;padding:8px;">无领用记录</p>' :
+          `<table class="data-table" style="font-size:12px;">
+            <thead><tr><th>序号</th><th>劳动防护用品名称</th><th>规格型号</th><th>领用数量</th><th>单位</th><th>领用人</th><th>领用日期</th><th>备注</th></tr></thead>
+            <tbody>${items.map((item, i) => `<tr>
+              <td style="text-align:center;">${i+1}</td>
+              <td>${Common.escapeHtml(item.name)}</td>
+              <td>${Common.escapeHtml(item.spec||'')}</td>
+              <td style="text-align:center;">${item.qty}</td>
+              <td style="text-align:center;">${Common.escapeHtml(item.unit||'')}</td>
+              <td>${Common.escapeHtml(item.employee_name||'')}</td>
+              <td style="text-align:center;">${Common.formatDate(item.approved_at)}</td>
+              <td>${Common.escapeHtml(item.note||'')}</td>
+            </tr>`).join('')}</tbody>
+          </table>`}
+        </div>`;
+      };
+
+      let statusHtml = '';
+      if (isDone) {
+        statusHtml = `<div style="background:#e8f5e9;padding:10px;border-radius:6px;margin-bottom:12px;"><span class="badge badge-success">已完成</span> 班组长：${Common.escapeHtml(existing.tl_name||'')} ${Common.formatDateTime(existing.tl_at)} · 线长：${Common.escapeHtml(existing.ll_name||'')} ${Common.formatDateTime(existing.ll_at)}</div>`;
+      } else if (isSigned) {
+        statusHtml = `<div style="background:#fff3e0;padding:10px;border-radius:6px;margin-bottom:12px;"><span class="badge badge-warning">班组长已签</span> ${Common.escapeHtml(existing.tl_name||'')} ${Common.formatDateTime(existing.tl_at)}，等待线长审核</div>`;
+      }
+
+      area.innerHTML = `
+        <div class="card">
+          ${statusHtml}
+          ${renderDetailTable(formalDetails, '【正式工发放记录】', 'KAPABOL')}
+          ${renderDetailTable(laborDetails, '【劳务工发放记录】', '劳务')}
+          ${!isSigned ? `
+          <div style="margin-top:20px;">
+            <div class="form-group">
+              <label>班组长手写签名</label>
+              <canvas id="reportSigCanvas" class="signature-canvas"></canvas>
+              <p class="signature-label">请在上方签名</p>
+            </div>
+            <div class="btn-group">
+              <button class="btn btn-default" onclick="clearReportSig()">清除</button>
+              <button class="btn btn-success" onclick="signReport()">签名提交</button>
+              <button class="btn btn-default" disabled style="opacity:0.5;cursor:not-allowed;" title="请先签名提交后再打印">打印</button>
+            </div>
+          </div>` : `
+          <div class="btn-group" style="margin-top:16px;">
+            <button class="btn btn-primary" onclick="printReport()">打印</button>
+          </div>`}
+        </div>`;
+
+      if (!isSigned) {
+        setTimeout(() => {
+          const canvas = document.getElementById('reportSigCanvas');
+          if (canvas && canvas.offsetWidth > 0) {
+            window.reportSigPad = new SignaturePad('reportSigCanvas');
+          } else {
+            setTimeout(() => { window.reportSigPad = new SignaturePad('reportSigCanvas'); }, 300);
+          }
+        }, 200);
+      }
+    }
+
+    function clearReportSig() {
+      if (window.reportSigPad) window.reportSigPad.clear();
+    }
+
+    async function signReport() {
+      if (!window.reportSigPad || window.reportSigPad.isEmpty()) {
+        Common.toast('请先签名', 'error'); return;
+      }
+      const month = currentReport.month;
+      // 查找或创建月报记录
+      const { data: existing } = await supabase
+        .from('monthly_reports')
+        .select('*')
+        .eq('line_id', user.line_id)
+        .eq('team_id', user.team_id)
+        .eq('month', month)
+        .maybeSingle();
+
+      const sigImage = window.reportSigPad.toDataURL();
+      if (existing) {
+        await supabase.from('monthly_reports').update({
+          tl_sign: sigImage,
+          tl_name: user.name,
+          tl_at: new Date().toISOString(),
+          status: 'team_signed'
+        }).eq('id', existing.id);
+      } else {
+        await supabase.from('monthly_reports').insert({
+          line_id: user.line_id,
+          team_id: user.team_id,
+          month,
+          tl_sign: sigImage,
+          tl_name: user.name,
+          tl_at: new Date().toISOString(),
+          status: 'team_signed'
+        });
+      }
+      await Auth.logAction(user, 'sign_report', 'monthly_report', null, month + ' 月报签名');
+      Common.toast('签名成功，已提交线长审核', 'success');
+      loadReport(); // 刷新显示已签名状态
+    }
+
+    async function printReport() {
+      if (!currentReport) return;
+      const { month, formalDetails, laborDetails } = currentReport;
+      const monthNum = month.split('-')[1]?.replace(/^0/, '') || month;
+      const logoUrl = new URL('images/logo.png', window.location.href).href;
+
+      // 获取产线和班组名称
+      const [{ data: line }, { data: team }] = await Promise.all([
+        supabase.from('production_lines').select('name').eq('id', user.line_id).single(),
+        supabase.from('teams').select('name').eq('id', user.team_id).single()
+      ]);
+      const lineName = line?.name || '';
+      const teamName = team?.name || '';
+
+      const renderPrintTable = (items, logoText) => {
+        if (items.length === 0) return '';
+        const logoHtml = logoText === 'KAPABOL'
+          ? `<img src="${logoUrl}" style="max-height:50px;">`
+          : `<span style="font-size:22px;font-weight:bold;color:#1a73e8;letter-spacing:2px;">${logoText}</span>`;
+        return `
+        <div style="margin-bottom:30px;page-break-after:always;">
+          <div style="display:flex;align-items:center;margin-bottom:10px;">
+            <div style="flex:0 0 140px;">${logoHtml}</div>
+            <div style="flex:1;text-align:center;">
+              <h2 style="margin:0;font-size:24px;letter-spacing:3px;">&nbsp;&nbsp;${monthNum}月劳动防护用品发放记录表</h2>
+            </div>
+            <div style="flex:0 0 140px;"></div>
+          </div>
+          <table style="width:100%;border-collapse:collapse;margin-bottom:0;" border="1">
+            <tr>
+              <td style="padding:10px;width:50%;font-size:15px;">部门/产线：&nbsp;&nbsp;${lineName}（${teamName}）</td>
+              <td style="padding:10px;width:50%;font-size:15px;">发放人：&nbsp;&nbsp;${Common.escapeHtml(user.name)}</td>
+            </tr>
+          </table>
+          <table style="width:100%;border-collapse:collapse;" border="1">
+            <thead><tr style="background:#f5f5f5;">
+              <th style="padding:8px;width:5%;">序号</th>
+              <th style="padding:8px;width:18%;">劳动防护用品名称</th>
+              <th style="padding:8px;width:16%;">规格型号</th>
+              <th style="padding:8px;width:10%;">领用数量</th>
+              <th style="padding:8px;width:6%;">单位</th>
+              <th style="padding:8px;width:10%;">领用人</th>
+              <th style="padding:8px;width:10%;">领用日期</th>
+              <th style="padding:8px;width:15%;">备注</th>
+            </tr></thead>
+            <tbody>${items.map((item, i) => `<tr>
+              <td style="text-align:center;padding:8px;">${i+1}</td>
+              <td style="padding:8px;">${Common.escapeHtml(item.name)}</td>
+              <td style="padding:8px;">${Common.escapeHtml(item.spec||'')}</td>
+              <td style="text-align:center;padding:8px;">${item.qty}</td>
+              <td style="text-align:center;padding:8px;">${Common.escapeHtml(item.unit||'')}</td>
+              <td style="padding:8px;">${Common.escapeHtml(item.employee_name||'')}</td>
+              <td style="text-align:center;padding:8px;">${Common.formatDate(item.approved_at)}</td>
+              <td style="padding:8px;">${Common.escapeHtml(item.note||'')}</td>
+            </tr>`).join('')}</tbody>
+          </table>
+          <div style="display:flex;justify-content:space-between;margin-top:30px;">
+            <span style="font-size:14px;">班组长签名：____________</span>
+            <span style="font-size:14px;">线长审核签名：____________</span>
+          </div>
+        </div>`;
+      };
+
+      const formalHtml = renderPrintTable(formalDetails, 'KAPABOL');
+      const laborHtml = renderPrintTable(laborDetails, '劳务');
+
+      Common.printHTML(`
+        ${formalHtml || '<p style="text-align:center;color:#999;">正式工无领用记录</p>'}
+        ${laborHtml || '<p style="text-align:center;color:#999;">劳务工无领用记录</p>'}
+      `);
+    }
+
+    // 初始化
+    loadPending();
+    Auth.checkForceChangePassword();
+  </script>
+</body>
+</html>
