@@ -22,8 +22,8 @@
       <button type="submit" class="btn btn-primary btn-block" style="margin-top:8px;">登 录</button>
     </form>
     <div style="margin-top:20px;padding-top:16px;border-top:1px solid #eee;text-align:center;">
-      <p style="font-size:12px;color:#999;margin-bottom:8px;">员工领用请扫描产线二维码</p>
-      <a href="employee.html" class="btn btn-default btn-sm" style="text-decoration:none;">员工领用入口（测试）</a>
+      <p style="font-size:12px;color:#999;margin-bottom:8px;">手机扫码登录</p>
+      <img id="loginQr" src="" alt="登录二维码" style="width:140px;height:140px;border:1px solid #eee;border-radius:6px;">
     </div>
     <div style="margin-top:16px;font-size:11px;color:#bbb;text-align:center;">
       默认管理员：admin / admin123（首次登录请修改密码）
@@ -36,6 +36,10 @@
   <script src="js/auth.js"></script>
   <script src="js/common.js"></script>
   <script>
+    // 生成登录二维码（手机扫码打开本页）
+    const loginUrl = window.location.origin + window.location.pathname;
+    document.getElementById('loginQr').src = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(loginUrl);
+
     // 如果已登录，直接跳转
     const currentUser = Auth.getCurrentUser();
     if (currentUser) {
