@@ -239,16 +239,40 @@ table.data-table input[type="number"] {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #1a73e8 100%);
   padding: 20px;
+  position: relative;
+  overflow: hidden;
+}
+.login-page::before {
+  content: '';
+  position: absolute;
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+  top: -200px;
+  right: -150px;
+  border-radius: 50%;
+}
+.login-page::after {
+  content: '';
+  position: absolute;
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 70%);
+  bottom: -150px;
+  left: -100px;
+  border-radius: 50%;
 }
 .login-box {
   background: #fff;
-  border-radius: 12px;
-  padding: 32px 28px;
+  border-radius: 16px;
+  padding: 40px 36px;
   width: 100%;
-  max-width: 380px;
-  box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+  max-width: 420px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  position: relative;
+  z-index: 1;
 }
 .login-box h2 {
   text-align: center;
