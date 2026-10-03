@@ -134,7 +134,7 @@
     async function loadSupplies() {
       const { data } = await supabase
         .from('supply_stock')
-        .select('supply_id, quantity, supplies(id, name, spec, unit, status, safety_stock)')
+        .select('supply_id, quantity, supplies(id, name, spec, unit, status, safety_stock, max_claim)')
         .eq('line_id', currentLine.id)
         .gt('quantity', 0);
 
@@ -152,11 +152,12 @@
       list.innerHTML = supplies.map(s => {
         const isSelected = selectedSupplies.find(x => x.supply_id === s.supply_id);
         const lowStock = s.quantity <= (s.supplies.safety_stock || 0);
+        const maxClaim = s.supplies.max_claim || 0;
         return `
           <div class="supply-item ${isSelected ? 'selected' : ''}" onclick="toggleSupply('${s.supply_id}')">
             <div class="supply-name">${Common.escapeHtml(s.supplies.name)}</div>
             <div class="supply-spec">${Common.escapeHtml(s.supplies.spec || '')}</div>
-            <div class="stock ${lowStock ? 'low' : ''}">库存: ${s.quantity}</div>
+            <div class="stock ${lowStock ? 'low' : ''}">库存: ${s.quantity}${maxClaim > 0 ? ` · 单次限${maxClaim}` : ''}</div>
           </div>`;
       }).join('');
     }
@@ -174,7 +175,8 @@
           spec: s.supplies.spec,
           unit: s.supplies.unit,
           qty: 1,
-          stock: s.quantity
+          stock: s.quantity,
+          max_claim: s.supplies.max_claim || 0
         });
       }
       renderSupplyList();
@@ -195,7 +197,7 @@
               <div style="font-size:13px;font-weight:500;">${Common.escapeHtml(s.name)}</div>
               <div style="font-size:11px;color:#999;">${Common.escapeHtml(s.spec||'')}</div>
             </div>
-            <input type="number" min="1" max="${s.stock}" value="${s.qty}" onchange="updateQty(${i}, this.value)">
+            <input type="number" min="1" max="${s.max_claim > 0 ? Math.min(s.stock, s.max_claim) : s.stock}" value="${s.qty}" onchange="updateQty(${i}, this.value)">
             <span class="unit">${Common.escapeHtml(s.unit||'')}</span>
             <button class="btn btn-danger btn-sm" onclick="removeSupply(${i})">删</button>
           </div>`).join('') +
@@ -204,7 +206,13 @@
 
     function updateQty(idx, val) {
       const v = parseInt(val) || 1;
-      selectedSupplies[idx].qty = Math.max(1, Math.min(v, selectedSupplies[idx].stock));
+      const s = selectedSupplies[idx];
+      let maxVal = s.stock;
+      if (s.max_claim > 0) maxVal = Math.min(maxVal, s.max_claim);
+      s.qty = Math.max(1, Math.min(v, maxVal));
+      if (s.qty < v) {
+        Common.toast(s.max_claim > 0 ? `单次最多领用${s.max_claim}${s.unit||''}` : `库存不足，最多${s.stock}${s.unit||''}`, 'error');
+      }
     }
 
     function removeSupply(idx) {

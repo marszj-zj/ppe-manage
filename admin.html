@@ -65,7 +65,7 @@
       <div class="card">
         <div class="table-wrapper">
           <table class="data-table" id="supplyTable">
-            <thead><tr><th>编号</th><th>名称</th><th>规格型号</th><th>领用单位</th><th>采购单位</th><th>换算</th><th>分类</th><th>安全库存</th><th>状态</th><th>操作</th></tr></thead>
+            <thead><tr><th>编号</th><th>名称</th><th>规格型号</th><th>领用单位</th><th>采购单位</th><th>换算</th><th>分类</th><th>安全库存</th><th>单次上限</th><th>状态</th><th>操作</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -305,6 +305,7 @@
           <td>${(s.convert_ratio || 1) > 1 ? '1'+(s.purchase_unit||s.unit||'')+'='+(s.convert_ratio||1)+(s.unit||'') : '-'}</td>
           <td>${Common.escapeHtml(s.category || '')}</td>
           <td>${s.safety_stock || 0}</td>
+          <td>${s.max_claim > 0 ? s.max_claim : '不限'}</td>
           <td><span class="badge ${s.status === 'active' ? 'badge-success' : 'badge-default'}">${s.status === 'active' ? '启用' : '停用'}</span></td>
           <td><button class="btn btn-default btn-sm" onclick="editSupply('${s.id}')">编辑</button></td>
         </tr>`).join('');
@@ -323,6 +324,7 @@
         </div>
         <div class="form-row">
           <div class="form-group"><label>安全库存</label><input type="number" id="s_safety" value="${supply?.safety_stock || 0}"></div>
+          <div class="form-group"><label>单次领用上限</label><input type="number" id="s_max_claim" value="${supply?.max_claim || 0}" min="0" placeholder="0=不限制"></div>
           <div class="form-group"><label>分类</label><input type="text" id="s_category" value="${supply?.category || ''}" placeholder="如：头部防护"></div>
         </div>
         <div class="form-group"><label>状态</label><select id="s_status"><option value="active" ${supply?.status !== 'inactive' ? 'selected' : ''}>启用</option><option value="inactive" ${supply?.status === 'inactive' ? 'selected' : ''}>停用</option></select></div>`;
@@ -338,6 +340,7 @@
           unit, purchase_unit: purchaseUnit, convert_ratio: convertRatio,
           category: document.getElementById('s_category').value.trim(),
           safety_stock: parseInt(document.getElementById('s_safety').value) || 0,
+          max_claim: parseInt(document.getElementById('s_max_claim').value) || 0,
           status: document.getElementById('s_status').value
         };
         if (supply) {
@@ -358,9 +361,9 @@
     // 导出用品模板（含现有数据，方便批量修改采购单位和换算比例后重新导入）
     async function exportSuppliesTemplate() {
       if (allSupplies.length === 0) await loadSuppliesAdmin();
-      let csv = '\ufeff编号,名称,规格型号,领用单位,采购单位,换算比例,分类,安全库存\n';
+      let csv = '\ufeff编号,名称,规格型号,领用单位,采购单位,换算比例,分类,安全库存,单次领用上限\n';
       (allSupplies || []).forEach(s => {
-        csv += `${s.code || ''},${s.name || ''},${s.spec || ''},${s.unit || ''},${s.purchase_unit || s.unit || ''},${s.convert_ratio || 1},${s.category || ''},${s.safety_stock || 0}\n`;
+        csv += `${s.code || ''},${s.name || ''},${s.spec || ''},${s.unit || ''},${s.purchase_unit || s.unit || ''},${s.convert_ratio || 1},${s.category || ''},${s.safety_stock || 0},${s.max_claim || 0}\n`;
       });
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       const link = document.createElement('a');
@@ -431,6 +434,7 @@
           convert_ratio: convertRatio,
           category: r['分类'] || r['category'] || '',
           safety_stock: parseInt(r['安全库存'] || r['safety_stock'] || '0') || 0,
+          max_claim: parseInt(r['单次领用上限'] || r['max_claim'] || '0') || 0,
           status: 'active'
         };
         if (code && codeMap[code]) {
