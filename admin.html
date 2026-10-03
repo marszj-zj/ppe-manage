@@ -560,7 +560,7 @@
     }
 
     function showQrCode(token, lineName) {
-      const url = window.location.origin + window.location.pathname.replace('admin.html', '') + 'employee.html?line=' + token;
+      const url = window.location.origin + '/employee.html?line=' + token;
       document.getElementById('modalTitle').textContent = lineName + ' - 领用二维码';
       document.getElementById('modalBody').innerHTML = `
         <p style="font-size:13px;color:#666;margin-bottom:8px;">员工扫码进入领用页面（请将此二维码打印张贴到产线物料点）</p>
