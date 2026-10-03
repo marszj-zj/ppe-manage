@@ -189,7 +189,8 @@
         <h3>个人领用明细查询</h3>
         <div class="form-row">
           <div class="form-group"><label>员工姓名</label><input type="text" id="searchEmpName" placeholder="输入姓名查询"></div>
-          <div class="form-group"><label>月份</label><input type="month" id="searchEmpMonth"></div>
+          <div class="form-group"><label>开始日期</label><input type="date" id="searchEmpStart"></div>
+          <div class="form-group"><label>结束日期</label><input type="date" id="searchEmpEnd"></div>
         </div>
         <button class="btn btn-primary" onclick="searchEmpRequisitions()">查询</button>
         <div id="empReqArea" style="margin-top:16px;"></div>
@@ -1046,7 +1047,8 @@
     // ===== 个人领用明细查询 =====
     async function searchEmpRequisitions() {
       const name = document.getElementById('searchEmpName').value.trim();
-      const month = document.getElementById('searchEmpMonth').value;
+      const startDate = document.getElementById('searchEmpStart').value;
+      const endDate = document.getElementById('searchEmpEnd').value;
       if (!name) { Common.toast('请输入姓名', 'error'); return; }
 
       Common.showLoading('查询中...');
@@ -1054,8 +1056,9 @@
         .select('*, requisition_items(*), production_lines(name), users!team_leader_id(name)')
         .ilike('employee_name', `%${name}%`)
         .order('created_at', { ascending: false })
-        .limit(50);
-      if (month) query = query.gte('created_at', month + '-01T00:00:00').lte('created_at', month + '-31T23:59:59');
+        .limit(200);
+      if (startDate) query = query.gte('created_at', startDate + 'T00:00:00');
+      if (endDate) query = query.lte('created_at', endDate + 'T23:59:59');
       const { data } = await query;
 
       document.getElementById('empReqArea').innerHTML = (data || []).length === 0
