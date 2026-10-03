@@ -683,9 +683,23 @@
             <button class="btn btn-default btn-sm" onclick="showDemandDetailAdmin('${d.id}')">详情/打印</button>
             ${d.status === 'submitted' ? `<button class="btn btn-success btn-sm" onclick="adminSign('${d.id}')">签名发放</button>` : ''}
             ${d.status === 'admin_signed' ? `<button class="btn btn-danger btn-sm" onclick="cancelAdminSign('${d.id}')">撤回在途</button>` : ''}
+            <button class="btn btn-danger btn-sm" onclick="deleteDemandAdmin('${d.id}')">删除</button>
           </div>
         </div>`;
       }).join('');
+    }
+
+    async function deleteDemandAdmin(orderId) {
+      if (!Common.confirm('确认删除该需求单？删除后不可恢复，关联的明细也会一并删除。')) return;
+      Common.showLoading('删除中...');
+      // 先删除明细，再删除主单
+      await supabase.from('demand_order_items').delete().eq('demand_order_id', orderId);
+      const { error } = await supabase.from('demand_orders').delete().eq('id', orderId);
+      Common.hideLoading();
+      if (error) { Common.toast('删除失败：' + error.message, 'error'); return; }
+      await Auth.logAction(user, 'delete_demand', 'demand_orders', orderId, '删除需求单');
+      Common.toast('删除成功', 'success');
+      loadDemandsAdmin();
     }
 
     async function adminSign(orderId) {
