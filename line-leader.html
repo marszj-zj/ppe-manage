@@ -615,18 +615,26 @@
         <div><strong>单号：</strong>${data.order_no}</div>
         <div><strong>申领月份：</strong>${data.apply_month}</div>
         <table class="data-table" style="margin-top:8px;">
-          <thead><tr><th>用品</th><th>申请数量</th><th>单位</th></tr></thead>
-          <tbody>${data.demand_order_items.map(item => `<tr><td>${allSupplies.find(s=>s.id===item.supply_id)?.name || ''}</td><td>${item.demand_qty}</td><td>${item.unit||''}</td></tr>`).join('')}</tbody>
+          <thead><tr><th>用品</th><th>申请数量</th><th>已签收</th><th>剩余</th><th>单位</th></tr></thead>
+          <tbody>${data.demand_order_items.map(item => {
+            const received = item.actual_qty || 0;
+            const remain = item.demand_qty - received;
+            return `<tr><td>${allSupplies.find(s=>s.id===item.supply_id)?.name || ''}</td><td>${item.demand_qty}</td><td>${received}</td><td style="color:${remain>0?'#e53935':'#4caf50'};font-weight:600;">${remain}</td><td>${item.unit||''}</td></tr>`;
+          }).join('')}</tbody>
         </table>`;
 
-      // 部分领用区域
+      // 部分领用区域（显示剩余可签收量）
       const partialArea = document.getElementById('partialArea');
-      partialArea.innerHTML = data.demand_order_items.map((item, i) => `
+      partialArea.innerHTML = data.demand_order_items.map((item, i) => {
+        const received = item.actual_qty || 0;
+        const remain = item.demand_qty - received;
+        return `
         <div class="item-row">
-          <div class="name">${allSupplies.find(s=>s.id===item.supply_id)?.name || ''}</div>
-          <input type="number" min="0" max="${item.demand_qty}" value="${item.demand_qty}" class="actual-qty" data-idx="${i}">
+          <div class="name">${allSupplies.find(s=>s.id===item.supply_id)?.name || ''}${remain<=0?' <span style="color:#4caf50;font-size:11px;">(已收齐)</span>':''}</div>
+          <input type="number" min="0" max="${remain}" value="${remain>0?remain:0}" class="actual-qty" data-idx="${i}" ${remain<=0?'disabled':''}>
           <span class="unit">${item.unit||''}</span>
-        </div>`).join('');
+        </div>`;
+      }).join('');
 
       document.querySelectorAll('input[name="receiveType"]').forEach(r => {
         r.onchange = function() {
@@ -647,24 +655,43 @@
       Common.showLoading('签收中...');
       try {
         const items = currentReceive.demand_order_items;
-        const actualQtys = {};
+        const thisReceiveQtys = {}; // 本次签收数量
         if (receiveType === 'partial') {
           document.querySelectorAll('.actual-qty').forEach(input => {
             const idx = parseInt(input.dataset.idx);
-            actualQtys[items[idx].id] = parseInt(input.value) || 0;
+            thisReceiveQtys[items[idx].id] = parseInt(input.value) || 0;
           });
         } else {
-          items.forEach(item => { actualQtys[item.id] = item.demand_qty; });
+          // 全部领用：本次签收 = 申请量 - 已签收
+          items.forEach(item => {
+            const received = item.actual_qty || 0;
+            thisReceiveQtys[item.id] = Math.max(0, item.demand_qty - received);
+          });
         }
 
-        // 更新明细实际入库量 + 增加库存 + 写流水（自动换算：采购单位×换算比例=领用单位）
+        // 检查本次签收总量
+        const totalThisReceive = Object.values(thisReceiveQtys).reduce((a, b) => a + b, 0);
+        if (totalThisReceive <= 0) { Common.toast('本次签收数量不能为0', 'error'); Common.hideLoading(); return; }
+
+        let allReceived = true; // 是否全部收齐
+
+        // 更新明细实际入库量（累加） + 增加库存（只加本次） + 写流水
         for (const item of items) {
-          const actual = actualQtys[item.id] || 0;
-          await supabase.from('demand_order_items').update({ actual_qty: actual }).eq('id', item.id);
-          if (actual > 0) {
+          const thisQty = thisReceiveQtys[item.id] || 0;
+          const alreadyReceived = item.actual_qty || 0;
+          const totalActual = alreadyReceived + thisQty; // 累加后的总签收量
+
+          // 更新明细的actual_qty为累加后的值
+          await supabase.from('demand_order_items').update({ actual_qty: totalActual }).eq('id', item.id);
+
+          // 判断是否收齐
+          if (totalActual < item.demand_qty) allReceived = false;
+
+          // 库存只增加本次签收数量
+          if (thisQty > 0) {
             const supply = allSupplies.find(s => s.id === item.supply_id);
             const convertRatio = supply?.convert_ratio || 1;
-            const issueQty = actual * convertRatio; // 换算成领用单位
+            const issueQty = thisQty * convertRatio; // 换算成领用单位
             const { data: stock } = await supabase
               .from('supply_stock').select('quantity, id')
               .eq('supply_id', item.supply_id).eq('line_id', user.line_id).maybeSingle();
@@ -689,18 +716,20 @@
           }
         }
 
-        // 更新需求单状态
-        await supabase.from('demand_orders').update({
-          status: 'done',
-          receive_type: receiveType,
+        // 更新需求单状态：全部收齐→done，部分签收→保持admin_signed（可继续签收）
+        const updateData = {
+          receive_type: allReceived ? 'full' : 'partial',
           leader_sign: receiveSigPad.toDataURL(),
           leader_sign_at: new Date().toISOString()
-        }).eq('id', currentReceive.id);
+        };
+        if (allReceived) updateData.status = 'done';
+        await supabase.from('demand_orders').update(updateData).eq('id', currentReceive.id);
 
-        await Auth.logAction(user, 'receive', 'demand_orders', currentReceive.id, '签收入库');
-        Common.toast('签收成功，库存已增加', 'success');
+        await Auth.logAction(user, 'receive', 'demand_orders', currentReceive.id, allReceived ? '全部签收入库' : `部分签收入库（本次${totalThisReceive}件）`);
+        Common.toast(allReceived ? '签收完成，全部收齐' : `部分签收成功，剩余可继续签收（本次入库${totalThisReceive}件）`, 'success');
         closeReceiveModal();
         loadReceive();
+        loadDemands();
       } catch (e) {
         Common.toast('签收失败：' + e.message, 'error');
       }
