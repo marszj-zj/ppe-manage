@@ -369,6 +369,7 @@
             <div class="btn-group" style="margin-top:8px;">
               <button class="btn btn-default btn-sm" onclick="showDemandDetail('${d.id}')">详情/打印</button>
               ${(d.status === 'submitted') ? `<button class="btn btn-danger btn-sm" onclick="cancelDemand('${d.id}')">撤回</button>` : ''}
+              ${(d.status === 'admin_signed') ? `<button class="btn btn-success btn-sm" onclick="openReceive('${d.id}')">去签收</button>` : ''}
             </div>
           </div>`;
         }).join('');
@@ -1116,6 +1117,7 @@
     // 初始化
     loadSupplies();
     loadDemands();
+    loadReceive();
     Auth.checkForceChangePassword();
   </script>
 </body>
