@@ -317,7 +317,7 @@
 
         await supabase.from('demand_order_items').insert(items.map(it => ({
           order_id: order.id, supply_id: it.supply_id,
-          demand_qty: it.demand_qty, actual_qty: it.demand_qty,
+          demand_qty: it.demand_qty, actual_qty: 0,
           stock_snapshot: it.stock_snapshot, unit: it.unit, note: it.note
         })));
 
