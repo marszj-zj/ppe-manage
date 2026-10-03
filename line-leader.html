@@ -611,6 +611,18 @@
         .eq('id', orderId).single();
       currentReceive = data;
 
+      // 兼容旧数据bug：状态在途但已签收量=申请量，自动重置为0（无需删除重建）
+      if (data.status === 'admin_signed') {
+        const allFull = data.demand_order_items.every(item => (item.actual_qty || 0) >= item.demand_qty);
+        if (allFull) {
+          for (const item of data.demand_order_items) {
+            await supabase.from('demand_order_items').update({ actual_qty: 0 }).eq('id', item.id);
+            item.actual_qty = 0;
+          }
+          Common.toast('检测到旧数据，已自动重置签收进度', 'info');
+        }
+      }
+
       document.getElementById('receiveDetail').innerHTML = `
         <div><strong>单号：</strong>${data.order_no}</div>
         <div><strong>申领月份：</strong>${data.apply_month}</div>
