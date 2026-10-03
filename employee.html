@@ -126,6 +126,20 @@
         select.appendChild(opt);
       });
 
+      // 自动填充上次填写的信息（按产线记忆）
+      const savedInfo = localStorage.getItem('ppe_emp_info_' + lineToken);
+      if (savedInfo) {
+        try {
+          const info = JSON.parse(savedInfo);
+          if (info.name) document.getElementById('employeeName').value = info.name;
+          if (info.teamLeaderId) document.getElementById('teamLeaderSelect').value = info.teamLeaderId;
+          if (info.workerType) {
+            const radio = document.querySelector(`input[name="workerType"][value="${info.workerType}"]`);
+            if (radio) radio.checked = true;
+          }
+        } catch (e) {}
+      }
+
       // 获取该产线有库存的用品
       await loadSupplies();
       // 签名板延迟到进入签名页时初始化（隐藏状态下Canvas尺寸为0）
@@ -313,6 +327,14 @@
           detail: '员工提交领用单，指定班组长：' + tlName
         });
 
+        // 保存员工信息到localStorage（按产线记忆，下次自动填充）
+        const wtRadio = document.querySelector('input[name="workerType"]:checked');
+        localStorage.setItem('ppe_emp_info_' + currentLine.qr_token, JSON.stringify({
+          name: name,
+          teamLeaderId: teamLeaderId,
+          workerType: wtRadio ? wtRadio.value : ''
+        }));
+
         // 显示成功
         document.getElementById('reqNoDisplay').textContent = reqNo;
         document.getElementById('tlDisplay').textContent = tlName;
@@ -326,9 +348,7 @@
     }
 
     function resetForm() {
-      document.getElementById('employeeName').value = '';
-      document.getElementById('teamLeaderSelect').value = '';
-      document.querySelectorAll('input[name="workerType"]').forEach(r => r.checked = false);
+      // 保留姓名、班组长、用工性质（员工连续领用不用重填），只清选用品和签名
       selectedSupplies = [];
       sigPad.clear();
       renderSupplyList();
