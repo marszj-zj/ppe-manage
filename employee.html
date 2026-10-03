@@ -484,36 +484,71 @@
     async function viewHistoryDetail(reqNo) {
       Common.showLoading('查询中...');
       try {
-        // 从系统查询最新状态
-        const { data: reqData } = await supabase
-          .from('requisitions')
-          .select('id, req_no, created_at, employee_name, worker_type, status, reject_reason, sign_image, team_leader_id, users(name)')
-          .eq('req_no', reqNo)
-          .single();
+        // 先从本地历史取基础数据
+        const key = getHistoryKey();
+        let localRecord = null;
+        try {
+          const records = JSON.parse(localStorage.getItem(key) || '[]');
+          localRecord = records.find(x => x.req_no === reqNo);
+        } catch (e) {}
+
+        // 从系统查询最新状态（不关联users表，避免关联查询失败）
+        let reqData = null;
+        let queryError = null;
+        try {
+          const { data, error } = await supabase
+            .from('requisitions')
+            .select('id, req_no, created_at, employee_name, worker_type, status, reject_reason, sign_image, team_leader_id')
+            .eq('req_no', reqNo)
+            .single();
+          if (error) { queryError = error; reqData = null; }
+          else reqData = data;
+        } catch (e) { queryError = e; reqData = null; }
 
         if (reqData) {
-          const { data: itemsData } = await supabase
-            .from('requisition_items')
-            .select('name, spec, unit, qty')
-            .eq('req_id', reqData.id);
+          // 查询明细
+          let itemsData = [];
+          try {
+            const { data: items } = await supabase
+              .from('requisition_items')
+              .select('name, spec, unit, qty')
+              .eq('req_id', reqData.id);
+            itemsData = items || [];
+          } catch (e) {}
+
+          // 查询班组长姓名
+          let tlName = localRecord?.team_leader_name || '';
+          if (!tlName && reqData.team_leader_id) {
+            try {
+              const { data: tl } = await supabase
+                .from('users')
+                .select('name')
+                .eq('id', reqData.team_leader_id)
+                .single();
+              if (tl) tlName = tl.name;
+            } catch (e) {}
+          }
 
           const voucherData = {
             req_no: reqData.req_no,
             created_at: reqData.created_at,
             employee_name: reqData.employee_name,
             worker_type: reqData.worker_type,
-            team_leader_name: reqData.users?.name || '',
-            items: itemsData || [],
+            team_leader_name: tlName,
+            items: itemsData,
             sign_image: reqData.sign_image,
             status: reqData.status,
             reject_reason: reqData.reject_reason
           };
-
-          // 更新本地历史中的状态
           updateHistoryStatus(reqNo, reqData.status, reqData.reject_reason);
-
           voucherBackTarget = 'stepHistory';
           renderVoucher(voucherData, false);
+          showStep('stepVoucher');
+        } else if (localRecord) {
+          // 系统查询失败，回退到本地数据展示（状态可能不是最新）
+          Common.toast('网络查询受限，显示本地凭证（状态可能未更新）', 'warn');
+          voucherBackTarget = 'stepHistory';
+          renderVoucher(localRecord, false);
           showStep('stepVoucher');
         } else {
           Common.toast('未找到该领用记录', 'error');
