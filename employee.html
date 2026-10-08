@@ -66,6 +66,9 @@
           <label><input type="radio" name="workerType" value="labor"> 劳务工</label>
         </div>
       </div>
+      <div style="text-align:right;margin-bottom:8px;">
+        <a href="javascript:void(0)" onclick="refreshData()" style="font-size:12px;color:#999;text-decoration:underline;">🔄 刷新数据</a>
+      </div>
       <button class="btn btn-primary btn-block" onclick="goStep2()">下一步：选择用品</button>
     </div>
 
@@ -124,69 +127,202 @@
     let selectedSupplies = [];
     let sigPad = null;
     let voucherBackTarget = 'step1'; // 凭证详情页返回目标
+    let lineLoadPromise = null;    // 产线信息加载Promise
+    let teamLeadersLoadPromise = null; // 班组长列表加载Promise
+    let suppliesLoading = false;    // 用品列表是否正在加载
 
-    // ========== 初始化 ==========
-    async function init() {
+    // ========== 本地缓存工具 ==========
+    const CACHE_PREFIX = 'ppe_cache_';
+    const CACHE_EXPIRE = {
+      line: 7 * 24 * 60 * 60 * 1000,       // 产线信息缓存7天
+      teamLeaders: 1 * 24 * 60 * 60 * 1000 // 班组长列表缓存1天
+    };
+    function getCache(key, expireMs) {
+      try {
+        const raw = localStorage.getItem(CACHE_PREFIX + key);
+        if (!raw) return null;
+        const { data, timestamp } = JSON.parse(raw);
+        if (Date.now() - timestamp > expireMs) return null;
+        return data;
+      } catch (e) { return null; }
+    }
+    function setCache(key, data) {
+      try { localStorage.setItem(CACHE_PREFIX + key, JSON.stringify({ data, timestamp: Date.now() })); } catch (e) {}
+    }
+    function clearCache(key) {
+      try { localStorage.removeItem(CACHE_PREFIX + key); } catch (e) {}
+    }
+
+    // ========== 初始化（先渲染表单，后台并行加载） ==========
+    function init() {
       const urlParams = new URLSearchParams(window.location.search);
       const lineToken = urlParams.get('line') || 'line-a-token';
 
-      const { data: lineData, error: lineError } = await supabase
-        .from('production_lines')
-        .select('*')
-        .eq('qr_token', lineToken)
-        .eq('status', 'active')
-        .single();
-
-      if (lineError || !lineData) {
-        alert('无效的产线二维码，请联系管理员');
-        return;
+      // 1. 立即显示表单（产线名称先显示加载中，班组长下拉先显示加载中）
+      const cachedLine = getCache('line_' + lineToken, CACHE_EXPIRE.line);
+      if (cachedLine) {
+        currentLine = cachedLine;
+        document.getElementById('lineName').value = cachedLine.name;
+        document.getElementById('pageTitle').textContent = cachedLine.name + ' - 领用登记';
+      } else {
+        document.getElementById('lineName').value = '加载中...';
       }
-      currentLine = lineData;
-      document.getElementById('lineName').value = lineData.name;
-      document.getElementById('pageTitle').textContent = lineData.name + ' - 领用登记';
 
-      const { data: tlData } = await supabase
-        .from('users')
-        .select('id, name, team_id, teams(name)')
-        .eq('role', 'team_leader')
-        .eq('line_id', lineData.id)
-        .eq('status', 'active');
+      const cachedTL = getCache('teamLeaders_' + lineToken, CACHE_EXPIRE.teamLeaders);
+      if (cachedTL && cachedTL.length > 0) {
+        teamLeaders = cachedTL;
+        renderTeamLeaders();
+      } else {
+        const select = document.getElementById('teamLeaderSelect');
+        select.innerHTML = '<option value="">加载中...</option>';
+      }
 
-      teamLeaders = tlData || [];
+      // 2. 自动填充上次填写的员工信息（已有缓存，直接用）
+      fillSavedEmployeeInfo(lineToken);
+
+      // 3. 后台并行加载产线信息和班组长列表（不阻塞员工填表）
+      lineLoadPromise = loadLineInfo(lineToken);
+      teamLeadersLoadPromise = loadTeamLeaders(lineToken);
+
+      // 4. 产线信息加载完后，后台预加载用品列表（进入step2时就有数据了）
+      lineLoadPromise.then(() => { if (currentLine) preloadSupplies(); });
+    }
+
+    // 加载产线信息（后台异步，完成后更新UI）
+    async function loadLineInfo(lineToken) {
+      try {
+        const { data: lineData, error } = await supabase
+          .from('production_lines')
+          .select('*')
+          .eq('qr_token', lineToken)
+          .eq('status', 'active')
+          .single();
+        if (error || !lineData) {
+          if (!currentLine) {
+            document.getElementById('lineName').value = '产线信息加载失败';
+            Common.toast('无效的产线二维码，请联系管理员', 'error');
+          }
+          return;
+        }
+        currentLine = lineData;
+        document.getElementById('lineName').value = lineData.name;
+        document.getElementById('pageTitle').textContent = lineData.name + ' - 领用登记';
+        setCache('line_' + lineToken, lineData);
+      } catch (e) {
+        if (!currentLine) {
+          document.getElementById('lineName').value = '产线信息加载失败';
+        }
+      }
+    }
+
+    // 加载班组长列表（后台异步，完成后更新下拉）
+    async function loadTeamLeaders(lineToken) {
+      try {
+        // 先等产线信息加载完（需要line_id）
+        if (lineLoadPromise) await lineLoadPromise;
+        if (!currentLine) return;
+
+        const { data: tlData } = await supabase
+          .from('users')
+          .select('id, name, team_id, teams(name)')
+          .eq('role', 'team_leader')
+          .eq('line_id', currentLine.id)
+          .eq('status', 'active');
+        teamLeaders = tlData || [];
+        renderTeamLeaders();
+        if (teamLeaders.length > 0) {
+          setCache('teamLeaders_' + lineToken, teamLeaders);
+        }
+      } catch (e) {
+        // 加载失败，如果没有缓存数据，提示用户
+        if (teamLeaders.length === 0) {
+          const select = document.getElementById('teamLeaderSelect');
+          select.innerHTML = '<option value="">加载失败，请刷新重试</option>';
+        }
+      }
+    }
+
+    // 渲染班组长下拉（保留员工已选的）
+    function renderTeamLeaders() {
       const select = document.getElementById('teamLeaderSelect');
+      const currentVal = select.value;
+      select.innerHTML = '<option value="">请选择班组长</option>';
       teamLeaders.forEach(tl => {
         const opt = document.createElement('option');
         opt.value = tl.id;
         opt.textContent = tl.name + '（' + (tl.teams?.name || '') + '）';
         select.appendChild(opt);
       });
+      // 恢复员工已选的班组长
+      if (currentVal && teamLeaders.find(t => t.id === currentVal)) {
+        select.value = currentVal;
+      }
+    }
 
-      // 自动填充上次填写的信息
+    // 自动填充上次填写的员工信息
+    function fillSavedEmployeeInfo(lineToken) {
       const savedInfo = localStorage.getItem('ppe_emp_info_' + lineToken);
       if (savedInfo) {
         try {
           const info = JSON.parse(savedInfo);
           if (info.name) document.getElementById('employeeName').value = info.name;
-          if (info.teamLeaderId) document.getElementById('teamLeaderSelect').value = info.teamLeaderId;
+          if (info.teamLeaderId) {
+            // 等班组长列表加载完后再设置选中
+            if (teamLeadersLoadPromise) {
+              teamLeadersLoadPromise.then(() => {
+                document.getElementById('teamLeaderSelect').value = info.teamLeaderId;
+              });
+            } else {
+              document.getElementById('teamLeaderSelect').value = info.teamLeaderId;
+            }
+          }
           if (info.workerType) {
             const radio = document.querySelector(`input[name="workerType"][value="${info.workerType}"]`);
             if (radio) radio.checked = true;
           }
         } catch (e) {}
       }
+    }
 
-      await loadSupplies();
+    // 手动刷新数据（清除缓存并重新加载）
+    function refreshData() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const lineToken = urlParams.get('line') || 'line-a-token';
+      clearCache('line_' + lineToken);
+      clearCache('teamLeaders_' + lineToken);
+      teamLeaders = [];
+      supplies = [];
+      document.getElementById('lineName').value = '加载中...';
+      document.getElementById('teamLeaderSelect').innerHTML = '<option value="">加载中...</option>';
+      lineLoadPromise = loadLineInfo(lineToken);
+      teamLeadersLoadPromise = loadTeamLeaders(lineToken);
+      lineLoadPromise.then(() => { if (currentLine) preloadSupplies(); });
+      Common.toast('正在刷新数据...', 'success');
     }
 
     // ========== 用品加载与选择 ==========
+    // 后台预加载用品列表（进入step2时就有数据了）
+    function preloadSupplies() {
+      if (supplies.length > 0 || suppliesLoading) return;
+      loadSupplies();
+    }
+
     async function loadSupplies() {
-      const { data } = await supabase
-        .from('supply_stock')
-        .select('supply_id, quantity, supplies(id, name, spec, unit, status, safety_stock, max_claim)')
-        .eq('line_id', currentLine.id)
-        .gt('quantity', 0);
-      supplies = (data || []).filter(s => s.supplies);
-      renderSupplyList();
+      if (suppliesLoading) return;
+      suppliesLoading = true;
+      try {
+        const { data } = await supabase
+          .from('supply_stock')
+          .select('supply_id, quantity, supplies(id, name, spec, unit, status, safety_stock, max_claim)')
+          .eq('line_id', currentLine.id)
+          .gt('quantity', 0);
+        supplies = (data || []).filter(s => s.supplies);
+        renderSupplyList();
+      } catch (e) {
+        console.error('用品列表加载失败', e);
+      } finally {
+        suppliesLoading = false;
+      }
     }
 
     function renderSupplyList() {
@@ -267,9 +403,22 @@
       const tl = document.getElementById('teamLeaderSelect').value;
       const wt = document.querySelector('input[name="workerType"]:checked');
       if (!name) { Common.toast('请输入姓名', 'error'); return; }
-      if (!tl) { Common.toast('请选择班组长', 'error'); return; }
+      if (!tl) {
+        if (teamLeaders.length === 0) {
+          Common.toast('班组长列表加载中，请稍候', 'error');
+        } else {
+          Common.toast('请选择班组长', 'error');
+        }
+        return;
+      }
       if (!wt) { Common.toast('请选择用工性质', 'error'); return; }
       showStep('step2');
+      // 用品列表如果还没加载完，显示加载中并等待
+      if (supplies.length === 0) {
+        const list = document.getElementById('supplyList');
+        list.innerHTML = '<div class="empty-state"><div class="icon">⏳</div><p>用品列表加载中...</p></div>';
+        if (!suppliesLoading) loadSupplies();
+      }
     }
     function goStep3() {
       if (selectedSupplies.length === 0) { Common.toast('请至少选择一种用品', 'error'); return; }
