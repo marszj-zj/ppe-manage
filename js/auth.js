@@ -84,13 +84,34 @@ window.Auth = {
     }
   },
 
+  // 带重试的用户查询（网络波动时自动重试，不把网络错误误判为密码错误）
+  async queryUserWithRetry(username, maxRetries = 2) {
+    let lastError = null;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const { data, error } = await window.supabase
+          .from('users').select('*').eq('username', username).eq('status', 'active').maybeSingle();
+        if (!error) return { data, networkError: false };
+        lastError = error;
+      } catch (e) {
+        lastError = e;
+      }
+      if (attempt < maxRetries) {
+        await new Promise(r => setTimeout(r, 800 + attempt * 400));
+      }
+    }
+    return { data: null, networkError: true, error: lastError };
+  },
+
   // 登录
   async login(username, password) {
-    // 先按用户名查询（不比对密码）
-    const { data: user, error } = await window.supabase
-      .from('users').select('*').eq('username', username).eq('status', 'active').maybeSingle();
+    // 查询用户（带重试，区分网络错误）
+    const { data: user, networkError } = await this.queryUserWithRetry(username);
 
-    if (error || !user) {
+    if (networkError) {
+      return { success: false, message: '网络连接超时，请检查网络后点击重试', networkError: true };
+    }
+    if (!user) {
       return { success: false, message: '用户名或密码错误' };
     }
 
@@ -121,20 +142,15 @@ window.Auth = {
       return { success: false, message: `用户名或密码错误，还可尝试${remain}次` };
     }
 
-    // 登录成功：旧用户自动升级密码哈希为PBKDF2+盐
+    // 登录成功：旧用户自动升级密码哈希为PBKDF2+盐（后台执行，不阻塞登录）
     if (!user.salt) {
-      try {
-        const newSalt = this.generateSalt();
-        const newHash = await this.hashPassword(password, newSalt);
-        await window.supabase.from('users').update({ salt: newSalt, password: newHash }).eq('id', user.id);
-        user.salt = newSalt;
-      } catch (e) {
-        console.warn('密码哈希升级失败', e);
-      }
+      const newSalt = this.generateSalt();
+      this.hashPassword(password, newSalt).then(newHash => {
+        window.supabase.from('users').update({ salt: newSalt, password: newHash }).eq('id', user.id)
+          .catch(e => console.warn('密码哈希升级失败', e));
+      }).catch(() => {});
+      user.salt = newSalt;
     }
-
-    // 重置失败次数
-    await this.resetLoginFail(user.id);
 
     // 存入 localStorage
     const loginUser = {
@@ -146,12 +162,16 @@ window.Auth = {
       team_id: user.team_id
     };
 
-    // 检测是否是默认密码（admin123）
+    // 检测是否是默认密码（admin123），本地计算不额外请求
     const defaultHash = await this.hashPassword('admin123', user.salt);
     loginUser.mustChangePassword = (user.password === defaultHash);
 
     localStorage.setItem('ppe_user', JSON.stringify(loginUser));
-    await this.logAction(loginUser, 'login', 'users', user.id, '登录系统');
+
+    // 非关键操作后台执行：重置失败次数 + 写登录日志（不阻塞页面跳转）
+    this.resetLoginFail(user.id).catch(e => console.warn('重置失败次数异常', e));
+    this.logAction(loginUser, 'login', 'users', user.id, '登录系统').catch(e => console.warn('写登录日志异常', e));
+
     return { success: true, user: loginUser };
   },
 

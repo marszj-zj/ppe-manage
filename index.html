@@ -51,13 +51,18 @@
       const username = document.getElementById('username').value.trim();
       const password = document.getElementById('password').value;
 
-      Common.showLoading('登录中...');
+      Common.showLoading('登录中，网络较慢请稍候...');
       const result = await Auth.login(username, password);
       Common.hideLoading();
 
       if (result.success) {
         Common.toast('登录成功', 'success');
-        setTimeout(() => Auth.redirectByRole(result.user.role), 500);
+        setTimeout(() => Auth.redirectByRole(result.user.role), 300);
+      } else if (result.networkError) {
+        // 网络错误：提示后自动聚焦密码框，方便直接重试
+        Common.toast(result.message, 'error');
+        document.getElementById('password').focus();
+        document.getElementById('password').select();
       } else {
         Common.toast(result.message, 'error');
       }
