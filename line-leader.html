@@ -774,9 +774,18 @@
         </table></div>`;
       }
 
-      // 填充调整用品下拉
+      // 填充调整用品下拉（显示所有劳保用品，不只是有库存的，支持账上0库存但实际有库存的盘点调整）
+      if (allSupplies.length === 0) await loadSupplies();
+      const stockMap = {};
+      (data || []).forEach(s => { stockMap[s.supply_id] = s.quantity; });
       const sel = document.getElementById('adjustSupply');
-      sel.innerHTML = (data || []).map(s => `<option value="${s.supply_id}">${Common.escapeHtml(s.supplies?.name || '')}（当前${s.quantity}）</option>`).join('');
+      sel.innerHTML = allSupplies
+        .filter(s => s.status === 'active')
+        .map(s => {
+          const qty = stockMap[s.id] || 0;
+          const spec = s.spec ? '（' + Common.escapeHtml(s.spec) + '）' : '';
+          return `<option value="${s.id}">${Common.escapeHtml(s.name)}${spec}（当前${qty}）</option>`;
+        }).join('');
     }
 
     async function doAdjust() {
@@ -787,11 +796,12 @@
 
       Common.showLoading('提交中...');
       try {
-        // 检查调整后库存是否为负（预检查）
+        // 检查调整后库存是否为负（预检查，无库存记录视为当前0）
         const { data: stock } = await supabase
           .from('supply_stock').select('quantity')
           .eq('supply_id', supplyId).eq('line_id', user.line_id).maybeSingle();
-        if (stock && stock.quantity + qty < 0) { Common.toast('调整后库存不能为负', 'error'); Common.hideLoading(); return; }
+        const currentQty = stock ? stock.quantity : 0;
+        if (currentQty + qty < 0) { Common.toast('调整后库存不能为负', 'error'); Common.hideLoading(); return; }
 
         // 提交调整申请，不直接改库存
         await supabase.from('stock_adjustments').insert({
